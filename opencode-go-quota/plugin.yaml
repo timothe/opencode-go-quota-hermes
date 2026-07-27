@@ -1,0 +1,17 @@
+name: opencode-go-quota
+version: "0.1.0"
+description: >
+  Track OpenCode Go quota windows (5h / weekly / monthly) by scraping the
+  workspace dashboard. Warns via pre_llm_call when near a limit; optional
+  auto-block via pre_tool_call. Bundled skill teaches postpone-via-cron.
+author: timothe
+hooks:
+  - pre_llm_call
+  - pre_tool_call
+requires_env:
+  - name: OPENCODE_GO_WORKSPACE_ID
+    description: "Workspace ID from https://opencode.ai/workspace/{id}/go"
+    secret: false
+  - name: OPENCODE_GO_AUTH_COOKIE
+    description: "Value of the auth cookie for opencode.ai (DevTools → Cookies)"
+    secret: true
