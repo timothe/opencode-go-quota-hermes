@@ -11,12 +11,12 @@ def test_register_wires_everything():
     ctx = MagicMock()
     plugin.register(ctx)
     ctx.register_tool.assert_called_once()
-    assert ctx.register_tool.call_args.kwargs["name"] == "quota_check"
+    assert ctx.register_tool.call_args.kwargs["name"] == "opencode_go_quota_check"
     hook_names = [c.args[0] for c in ctx.register_hook.call_args_list]
     assert "pre_llm_call" in hook_names
     assert "pre_tool_call" in hook_names
     ctx.register_command.assert_called_once()
-    assert ctx.register_command.call_args.args[0] == "quota"
+    assert ctx.register_command.call_args.args[0] == "go-quota"
     ctx.register_skill.assert_called_once()
     assert ctx.register_skill.call_args.args[0] == "opencode-go-quota"
 
@@ -33,4 +33,5 @@ def test_skill_frontmatter():
     text = skill.read_text(encoding="utf-8")
     assert text.startswith("---")
     assert "name: opencode-go-quota" in text
-    assert "description:" in text
+    assert "What's my current quota?" in text
+    assert "opencode_go_quota_check" in text

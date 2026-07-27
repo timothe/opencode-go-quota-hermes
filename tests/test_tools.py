@@ -12,7 +12,7 @@ def _tools():
     return sys.modules[f"{PACKAGE_NAME}.tools"]
 
 
-def test_quota_check_json(monkeypatch):
+def test_quota_check_natural_language(monkeypatch):
     tools = _tools()
     monkeypatch.setenv("OPENCODE_GO_WORKSPACE_ID", "ws")
     monkeypatch.setenv("OPENCODE_GO_AUTH_COOKIE", "tok")
@@ -25,16 +25,33 @@ def test_quota_check_json(monkeypatch):
             html
         ),
     )
-    out = json.loads(tools.quota_check({}))
-    assert out["status"] in {"ok", "warn", "critical"}
-    assert "rolling" in out["windows"]
+    out = tools.opencode_go_quota_check({})
+    assert "OpenCode Go" in out
+    assert "remaining" in out.lower()
+    assert "T00:00:00" not in out
 
 
-def test_quota_slash_help():
-    assert "Usage" in _tools().quota_slash("help")
+def test_quota_check_json_opt_in(monkeypatch):
+    tools = _tools()
+    types = sys.modules[f"{PACKAGE_NAME}.quota.types"]
+    snap = types.QuotaSnapshot(
+        status="ok",
+        windows={"rolling": types.WindowUsage(0, 60, 100, "2026-01-01T00:00:00Z")},
+        breached=[],
+        soonest_reset_at=None,
+    )
+    monkeypatch.setattr(tools, "get_snapshot", lambda force=False, **k: snap)
+    out = json.loads(tools.opencode_go_quota_check({"json": True}))
+    assert out["status"] == "ok"
 
 
-def test_quota_slash_human(monkeypatch):
+def test_go_quota_slash_help():
+    help_text = _tools().go_quota_slash("help")
+    assert "What's my current quota?" in help_text
+    assert "/go-quota" in help_text
+
+
+def test_go_quota_slash_human(monkeypatch):
     tools = _tools()
     types = sys.modules[f"{PACKAGE_NAME}.quota.types"]
     snap = types.QuotaSnapshot(
@@ -47,6 +64,7 @@ def test_quota_slash_human(monkeypatch):
         message="WARN",
     )
     monkeypatch.setattr(tools, "get_snapshot", lambda force=False, **k: snap)
-    text = tools.quota_slash("")
-    assert "warn" in text
-    assert "5h" in text
+    text = tools.go_quota_slash("")
+    assert "OpenCode Go" in text
+    assert "getting low" in text
+    assert "2026-01-01T00:00:00Z" not in text

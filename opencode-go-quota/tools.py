@@ -7,25 +7,8 @@ from typing import Any, Optional
 
 from .quota.cache import SnapshotCache, default_cache
 from .quota.check import fetch_snapshot
-from .quota.types import WINDOW_LABELS, WINDOW_ORDER, QuotaSnapshot
-
-
-def _format_human(snapshot: QuotaSnapshot) -> str:
-    if snapshot.status in {"error", "incomplete"}:
-        return f"OpenCode Go quota unavailable ({snapshot.status}): {snapshot.error or snapshot.message}"
-    lines = [f"OpenCode Go quota: {snapshot.status}"]
-    for key in WINDOW_ORDER:
-        usage = snapshot.windows.get(key)
-        if usage is None:
-            continue
-        mark = " !" if key in snapshot.breached else ""
-        lines.append(
-            f"  {WINDOW_LABELS[key]}:{mark} {usage.percent_remaining:.1f}% remaining, "
-            f"resets {usage.reset_at}"
-        )
-    if snapshot.soonest_reset_at:
-        lines.append(f"  Soonest reset among breached: {snapshot.soonest_reset_at}")
-    return "\n".join(lines)
+from .quota.format import format_natural_summary, format_tool_guidance
+from .quota.types import QuotaSnapshot
 
 
 def get_snapshot(
@@ -44,34 +27,54 @@ def get_snapshot(
     return snapshot
 
 
-def quota_check(args: Optional[dict[str, Any]] = None, **_: Any) -> str:
-    """Hermes tool handler — returns JSON quota status."""
+def opencode_go_quota_check(args: Optional[dict[str, Any]] = None, **_: Any) -> str:
+    """Hermes tool — natural-language OpenCode Go quota for the LLM to relay."""
     args = args or {}
     force = bool(args.get("force") or args.get("refresh"))
+    as_json = bool(args.get("json") or args.get("raw"))
     snapshot = get_snapshot(force=force)
-    return json.dumps(snapshot.to_dict(), indent=2)
+    if as_json:
+        return json.dumps(snapshot.to_dict(), indent=2)
+    return f"{format_natural_summary(snapshot)}\n\n({format_tool_guidance()})"
 
 
-def quota_slash(raw_args: str = "") -> str:
-    """Slash command /quota handler."""
+# Back-compat alias if anything still imports the old name.
+quota_check = opencode_go_quota_check
+
+
+def go_quota_slash(raw_args: str = "") -> str:
+    """Slash command /go-quota handler."""
     text = (raw_args or "").strip().lower()
     if text in {"help", "-h", "--help"}:
         return (
-            "Usage: /quota [refresh]\n"
-            "Show OpenCode Go rolling (5h), weekly, and monthly remaining quota.\n"
+            "Usage: /go-quota [refresh]\n"
+            "Show your OpenCode Go remaining quota (5-hour / weekly / monthly).\n"
+            "In chat you can also just ask: \"What's my current quota?\"\n"
             "Optional: OPENCODE_GO_QUOTA_AUTO_BLOCK=true to block tools near limit."
         )
-    force = text in {"refresh", "--refresh", "-r"}
-    snapshot = get_snapshot(force=force)
-    return _format_human(snapshot)
+    force = text in {"refresh", "--refresh", "-r", "json"}
+    as_json = text == "json"
+    snapshot = get_snapshot(force=force or as_json)
+    if as_json:
+        return json.dumps(snapshot.to_dict(), indent=2)
+    return format_natural_summary(snapshot)
 
+
+quota_slash = go_quota_slash
+
+
+TOOL_NAME = "opencode_go_quota_check"
 
 QUOTA_CHECK_SCHEMA: dict[str, Any] = {
-    "name": "quota_check",
+    "name": TOOL_NAME,
     "description": (
-        "Check OpenCode Go subscription quota windows (5h rolling, weekly, monthly). "
-        "Returns remaining percent, reset times, and status ok|warn|critical. "
-        "Use before long tasks or when hitting rate/quota errors."
+        "Check the user's OpenCode Go subscription quota only "
+        "(5-hour rolling, weekly, and monthly windows on opencode.ai). "
+        "Use when they ask things like \"What's my current quota?\", "
+        "\"How much OpenCode Go do I have left?\", before long Go tasks, "
+        "or after Go 429/quota errors. "
+        "Returns a natural-language summary — relay it to the user in plain English; "
+        "do not confuse this with OpenRouter, Zen billing, or hermes insights."
     ),
     "parameters": {
         "type": "object",
@@ -79,7 +82,11 @@ QUOTA_CHECK_SCHEMA: dict[str, Any] = {
             "force": {
                 "type": "boolean",
                 "description": "Bypass short TTL cache and re-scrape the dashboard.",
-            }
+            },
+            "json": {
+                "type": "boolean",
+                "description": "If true, return machine JSON instead of prose (rarely needed).",
+            },
         },
         "required": [],
         "additionalProperties": False,

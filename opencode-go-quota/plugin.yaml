@@ -1,17 +1,28 @@
 name: opencode-go-quota
-version: "0.1.0"
+version: "0.1.1"
 description: >
-  Track OpenCode Go quota windows (5h / weekly / monthly) by scraping the
-  workspace dashboard. Warns via pre_llm_call when near a limit; optional
-  auto-block via pre_tool_call. Bundled skill teaches postpone-via-cron.
+  OpenCode Go only — track 5h / weekly / monthly subscription quota by scraping
+  the opencode.ai workspace dashboard. Natural-language answers when you ask
+  "What's my current quota?". Warns via pre_llm_call; optional auto-block.
+  Does not cover OpenRouter, Zen billing, or hermes insights.
 author: timothe
 hooks:
   - pre_llm_call
   - pre_tool_call
 requires_env:
   - name: OPENCODE_GO_WORKSPACE_ID
-    description: "Workspace ID from https://opencode.ai/workspace/{id}/go"
+    description: >
+      Workspace ID from the OpenCode Go usage URL.
+      Open https://opencode.ai/auth and sign in, then open your Go workspace page
+      (URL looks like https://opencode.ai/workspace/YOUR_ID/go). Copy YOUR_ID only —
+      not the whole URL. This is NOT your API key.
     secret: false
   - name: OPENCODE_GO_AUTH_COOKIE
-    description: "Value of the auth cookie for opencode.ai (DevTools → Cookies)"
+    description: >
+      Browser session cookie named "auth" for opencode.ai (required because Go has
+      no public quota API). Chrome/Edge/Brave: open https://opencode.ai while signed
+      in → F12 DevTools → Application (Chrome) or Storage (Firefox) → Cookies →
+      https://opencode.ai → select cookie named exactly "auth" → copy its Value
+      (long string). Paste that value here. It expires when you sign out or after
+      some idle time — re-copy if quota checks start failing. Never commit this.
     secret: true
