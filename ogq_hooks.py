@@ -109,28 +109,30 @@ def _context_block(snapshot: QuotaSnapshot) -> str:
 def _ready_context() -> str:
     return (
         "[OpenCode Go quota plugin is active] "
-        "The opencode-go-quota plugin is loaded. Briefly tell the user that "
-        "OpenCode Go quota monitoring is in place, and that they can ask "
-        "\"What's my current quota?\" anytime (or use /go-quota). "
-        "Do not dump env var names unless they ask how it works."
+        "Briefly tell the user (one short sentence) that OpenCode Go quota "
+        "monitoring is active — they can ask \"What's my current quota?\" "
+        "or use /go-quota. Do not dump env var names."
     )
 
 
-def _quota_question_context() -> str:
+def _quota_answer_context(snapshot: QuotaSnapshot) -> str:
     return (
-        "[OpenCode Go quota routing] "
-        "The user is asking about remaining quota/allowance. "
-        "Call tool opencode_go_quota_check now and relay its natural-language "
-        "summary. "
-        "Do NOT load skill provider-usage-tracking for OpenCode Go — that skill "
-        "incorrectly says there is no API and only points at the web dashboard. "
-        "Do NOT send the user to opencode.ai/auth for this question."
+        "[OpenCode Go quota — live result already fetched] "
+        f"{format_natural_summary(snapshot)} "
+        "Relay this answer to the user in natural language. "
+        "Do NOT say you lack a quota tool. Do NOT load provider-usage-tracking. "
+        "Do NOT send them to the web dashboard for this."
     )
 
 
-def _should_announce_ready(is_first_turn: bool) -> bool:
+def _should_announce_ready() -> bool:
+    """Once per gateway/CLI process — not tied to is_first_turn.
+
+    Gateway sessions often continue across restarts with existing history, so
+    is_first_turn is frequently false after `hermes gateway restart`.
+    """
     global _announced_this_process
-    if not announce_enabled() or not is_first_turn or _announced_this_process:
+    if not announce_enabled() or _announced_this_process:
         return False
     _announced_this_process = True
     try:
@@ -157,13 +159,22 @@ def on_pre_llm_call(
 ) -> Optional[dict[str, str]]:
     chunks: list[str] = []
 
-    if _should_announce_ready(is_first_turn):
+    if _should_announce_ready():
         chunks.append(_ready_context())
 
+    # Natural-language quota asks: fetch here so the answer works even when
+    # Tool Search has deferred opencode_go_quota_check behind tool_search.
     if looks_like_quota_question(user_message):
-        chunks.append(_quota_question_context())
+        try:
+            snapshot = get_snapshot()
+            chunks.append(_quota_answer_context(snapshot))
+        except Exception:  # noqa: BLE001
+            chunks.append(
+                "[OpenCode Go quota] Could not fetch quota just now. "
+                "Ask the user to try /go-quota, or refresh OPENCODE_GO_AUTH_COOKIE."
+            )
 
-    if is_opencode_go_model(model):
+    if is_opencode_go_model(model) and not looks_like_quota_question(user_message):
         try:
             snapshot = get_snapshot()
         except Exception:  # noqa: BLE001

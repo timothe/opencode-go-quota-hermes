@@ -110,7 +110,7 @@ Expect a spoken answer, for example:
 | Tool | `opencode_go_quota_check` | Fetch Go quota; returns natural-language summary for the model |
 | Slash | `/go-quota` | Same summary on demand |
 | Skill | `opencode-go-quota` | Postpone-via-cron playbook |
-| Hook | `pre_llm_call` | Warn when low; announce “plugin active” on first turn after restart |
+| Hook | `pre_llm_call` | Warn when low; announce once per process; answer NL quota asks inline (bypasses Tool Search deferral) |
 | Hook | `pre_tool_call` | Optional hard block when critically low |
 
 ### Avoiding conflicts with other skills/plugins
@@ -158,9 +158,9 @@ schedule a `cronjob` after reset.
 ### If Hermes still opens `provider-usage-tracking`
 
 That bundled skill wrongly says OpenCode Go has no API. This plugin’s
-`pre_llm_call` hook now intercepts quota questions and tells the model to call
-`opencode_go_quota_check` instead. After updating, restart the gateway so the
-hook is active.
+`pre_llm_call` hook intercepts quota questions, fetches quota itself, and
+injects the answer into context (so it still works when Hermes Tool Search
+has deferred `opencode_go_quota_check`). After updating, restart the gateway.
 
 ## Develop / test
 

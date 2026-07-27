@@ -36,7 +36,7 @@ def test_looks_like_quota_question():
     assert not hooks.looks_like_quota_question("what's the weather?")
 
 
-def test_quota_question_routes_away_from_provider_usage(monkeypatch):
+def test_quota_question_injects_live_answer(monkeypatch):
     hooks = _hooks()
     hooks.reset_announce_state_for_tests()
     monkeypatch.setenv("OPENCODE_GO_QUOTA_ANNOUNCE", "false")
@@ -47,8 +47,9 @@ def test_quota_question_routes_away_from_provider_usage(monkeypatch):
         user_message="what's my remaining quota?",
     )
     assert out is not None
-    assert "opencode_go_quota_check" in out["context"]
+    assert "already fetched" in out["context"]
     assert "provider-usage-tracking" in out["context"]
+    assert "lack a quota tool" in out["context"]
 
 
 def test_warn_injects(monkeypatch):
@@ -71,16 +72,18 @@ def test_warn_skips_healthy(monkeypatch):
     assert hooks.on_pre_llm_call(session_id="s1", model="opencode-go/qwen") is None
 
 
-def test_announce_ready_on_first_turn(monkeypatch):
+def test_announce_ready_once_per_process(monkeypatch):
     hooks = _hooks()
     hooks.reset_announce_state_for_tests()
     monkeypatch.setenv("OPENCODE_GO_QUOTA_ANNOUNCE", "true")
     monkeypatch.setattr(hooks, "get_snapshot", lambda: _snap("ok"))
+    # Gateway sessions often continue after restart → is_first_turn=False.
     out = hooks.on_pre_llm_call(
-        session_id="s1", model="opencode-go/qwen", is_first_turn=True
+        session_id="s1", model="opencode-go/qwen", is_first_turn=False
     )
     assert out is not None
     assert "plugin is active" in out["context"].lower() or "monitoring" in out["context"].lower()
+    assert hooks.on_pre_llm_call(session_id="s1", model="opencode-go/qwen") is None
 
 
 def test_block_on_critical(monkeypatch):
