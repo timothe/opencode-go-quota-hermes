@@ -7,9 +7,9 @@ import time
 from pathlib import Path
 from typing import Any, Optional
 
-from .quota.format import format_natural_summary
-from .quota.types import QuotaSnapshot
-from .tools import TOOL_NAME, get_snapshot
+from quota.format import format_natural_summary
+from quota.types import QuotaSnapshot
+from tools import TOOL_NAME, get_snapshot
 
 DEFAULT_ALLOWLIST = (
     TOOL_NAME,

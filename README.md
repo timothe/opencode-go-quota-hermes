@@ -13,11 +13,19 @@ workspace dashboard (approach inspired by
 ## Install
 
 ```bash
-hermes plugins install timothe/opencode-go-quota-hermes/opencode-go-quota --enable
+hermes plugins install timothe/opencode-go-quota-hermes --enable
 ```
 
-Hermes prompts for workspace ID and auth cookie (see below), saves them to
-`~/.hermes/.env`, then enable the plugin.
+Hermes clones the repo (keeps `.git`, so later `hermes plugins update` works),
+prompts for workspace ID and auth cookie, saves them to `~/.hermes/.env`, then
+enables the plugin.
+
+If you previously installed a subdirectory path (`…/opencode-go-quota`) and
+`hermes plugins update` says “no .git directory”, force-reinstall once:
+
+```bash
+hermes plugins install timothe/opencode-go-quota-hermes --force --enable
+```
 
 Restart the gateway so hooks load:
 
@@ -149,19 +157,6 @@ pytest -q
 ```
 
 No live network or cookies required for unit tests.
-
-## Layout
-
-```text
-opencode-go-quota/          # Hermes plugin path (install this subdirectory)
-  plugin.yaml
-  __init__.py
-  hooks.py
-  tools.py
-  quota/
-  skills/opencode-go-quota/SKILL.md
-tests/
-```
 
 ## License
 

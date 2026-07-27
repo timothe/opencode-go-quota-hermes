@@ -3,10 +3,22 @@
 from __future__ import annotations
 
 import logging
+import sys
 from pathlib import Path
 
-from .hooks import on_pre_llm_call, on_pre_tool_call
-from .tools import QUOTA_CHECK_SCHEMA, TOOL_NAME, go_quota_slash, opencode_go_quota_check
+# Hermes loads this as a package; pytest may import it as a bare module.
+# Putting the plugin dir on sys.path lets sibling imports work either way.
+_PLUGIN_DIR = Path(__file__).resolve().parent
+if str(_PLUGIN_DIR) not in sys.path:
+    sys.path.insert(0, str(_PLUGIN_DIR))
+
+from hooks import on_pre_llm_call, on_pre_tool_call  # noqa: E402
+from tools import (  # noqa: E402
+    QUOTA_CHECK_SCHEMA,
+    TOOL_NAME,
+    go_quota_slash,
+    opencode_go_quota_check,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +32,6 @@ def register(ctx) -> None:
     )
     ctx.register_hook("pre_llm_call", on_pre_llm_call)
     ctx.register_hook("pre_tool_call", on_pre_tool_call)
-    # Scoped slash name — avoid colliding with generic /quota from other plugins.
     ctx.register_command(
         "go-quota",
         handler=go_quota_slash,

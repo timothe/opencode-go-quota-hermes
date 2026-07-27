@@ -5,10 +5,10 @@ from __future__ import annotations
 import json
 from typing import Any, Optional
 
-from .quota.cache import SnapshotCache, default_cache
-from .quota.check import fetch_snapshot
-from .quota.format import format_natural_summary, format_tool_guidance
-from .quota.types import QuotaSnapshot
+from quota.cache import SnapshotCache, default_cache
+from quota.check import fetch_snapshot
+from quota.format import format_natural_summary, format_tool_guidance
+from quota.types import QuotaSnapshot
 
 
 def get_snapshot(

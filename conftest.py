@@ -1,3 +1,8 @@
-"""Root pytest config."""
+"""Root pytest config — ignore Hermes plugin entry modules as tests."""
 
-# Nothing to ignore at repo root anymore — plugin lives in opencode-go-quota/.
+collect_ignore = [
+    "__init__.py",
+    "hooks.py",
+    "tools.py",
+    "plugin_loader.py",
+]

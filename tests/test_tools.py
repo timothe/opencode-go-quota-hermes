@@ -18,9 +18,9 @@ def test_quota_check_natural_language(monkeypatch):
     monkeypatch.setenv("OPENCODE_GO_AUTH_COOKIE", "tok")
     tools.default_cache.clear()
     html = build_ssr_html({"rolling": (10, 60), "weekly": (20, 120), "monthly": (30, 180)})
-    scrape = sys.modules[f"{PACKAGE_NAME}.quota.scrape"]
+    scrape = sys.modules["quota.scrape"]
     monkeypatch.setattr(
-        f"{PACKAGE_NAME}.quota.check.query_opencode_go_quota",
+        "quota.check.query_opencode_go_quota",
         lambda workspace_id, auth_cookie, opener=None, timeout_s=10: scrape.parse_dashboard_html(
             html
         ),
@@ -33,7 +33,7 @@ def test_quota_check_natural_language(monkeypatch):
 
 def test_quota_check_json_opt_in(monkeypatch):
     tools = _tools()
-    types = sys.modules[f"{PACKAGE_NAME}.quota.types"]
+    types = sys.modules["quota.types"]
     snap = types.QuotaSnapshot(
         status="ok",
         windows={"rolling": types.WindowUsage(0, 60, 100, "2026-01-01T00:00:00Z")},
@@ -53,7 +53,7 @@ def test_go_quota_slash_help():
 
 def test_go_quota_slash_human(monkeypatch):
     tools = _tools()
-    types = sys.modules[f"{PACKAGE_NAME}.quota.types"]
+    types = sys.modules["quota.types"]
     snap = types.QuotaSnapshot(
         status="warn",
         windows={

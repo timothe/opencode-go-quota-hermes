@@ -24,7 +24,6 @@ def test_register_wires_everything():
 def test_skill_frontmatter():
     skill = (
         Path(__file__).resolve().parents[1]
-        / "opencode-go-quota"
         / "skills"
         / "opencode-go-quota"
         / "SKILL.md"
