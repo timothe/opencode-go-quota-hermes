@@ -34,9 +34,10 @@ hermes gateway restart
 # or: hermes gateway stop && hermes gateway start
 ```
 
-On the **first chat turn after that restart**, Hermes gets a short notice that
-OpenCode Go quota monitoring is active and should tell you it’s in place.
-Disable with `OPENCODE_GO_QUOTA_ANNOUNCE=false` if you don’t want that.
+On the **first chat after a fresh install** (once ever), Hermes is nudged to
+say quota monitoring is on. Restarts/updates do not re-announce. Disable with
+`OPENCODE_GO_QUOTA_ANNOUNCE=false`. To re-test: delete
+`~/.hermes/cache/opencode-go-quota-announced`.
 
 ### Update
 
@@ -110,7 +111,7 @@ Expect a spoken answer, for example:
 | Tool | `opencode_go_quota_check` | Fetch Go quota; returns natural-language summary for the model |
 | Slash | `/go-quota` | Same summary on demand |
 | Skill | `opencode-go-quota` | Postpone-via-cron playbook |
-| Hook | `pre_llm_call` | Warn when low; announce once per process; answer NL quota asks inline (bypasses Tool Search deferral) |
+| Hook | `pre_llm_call` | Warn when low; once-ever first-install notice; answer NL quota asks inline (bypasses Tool Search deferral) |
 | Hook | `pre_tool_call` | Optional hard block when critically low |
 
 ### Avoiding conflicts with other skills/plugins
@@ -131,7 +132,7 @@ Names are intentionally prefixed (`opencode_go_…`, `/go-quota`, skill
 OPENCODE_GO_QUOTA_WARN=20            # % remaining → warn (default 20)
 OPENCODE_GO_QUOTA_CRITICAL=5         # % remaining → critical (default 5)
 OPENCODE_GO_QUOTA_AUTO_BLOCK=true    # block non-allowlisted tools when critical
-OPENCODE_GO_QUOTA_ANNOUNCE=false     # skip first-turn “plugin is active” notice
+OPENCODE_GO_QUOTA_ANNOUNCE=false     # skip once-ever first-install notice
 # OPENCODE_GO_QUOTA_BLOCK_ALLOWLIST=opencode_go_quota_check,cronjob,memory,session_search,skill_view,skills_list,todo
 ```
 

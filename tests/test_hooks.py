@@ -72,17 +72,23 @@ def test_warn_skips_healthy(monkeypatch):
     assert hooks.on_pre_llm_call(session_id="s1", model="opencode-go/qwen") is None
 
 
-def test_announce_ready_once_per_process(monkeypatch):
+def test_announce_ready_once_after_install(monkeypatch, tmp_path):
     hooks = _hooks()
+    marker = tmp_path / "announced"
+    monkeypatch.setattr(hooks, "_READY_MARKER", marker)
     hooks.reset_announce_state_for_tests()
     monkeypatch.setenv("OPENCODE_GO_QUOTA_ANNOUNCE", "true")
     monkeypatch.setattr(hooks, "get_snapshot", lambda: _snap("ok"))
-    # Gateway sessions often continue after restart → is_first_turn=False.
+
     out = hooks.on_pre_llm_call(
         session_id="s1", model="opencode-go/qwen", is_first_turn=False
     )
     assert out is not None
-    assert "plugin is active" in out["context"].lower() or "monitoring" in out["context"].lower()
+    assert "first-install notice" in out["context"]
+    assert marker.exists()
+
+    # Later process / restart: disk marker present → no re-announce.
+    hooks._announced_this_process = False
     assert hooks.on_pre_llm_call(session_id="s1", model="opencode-go/qwen") is None
 
 

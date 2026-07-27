@@ -108,10 +108,10 @@ def _context_block(snapshot: QuotaSnapshot) -> str:
 
 def _ready_context() -> str:
     return (
-        "[OpenCode Go quota plugin is active] "
-        "Briefly tell the user (one short sentence) that OpenCode Go quota "
-        "monitoring is active — they can ask \"What's my current quota?\" "
-        "or use /go-quota. Do not dump env var names."
+        "[OpenCode Go quota — first-install notice] "
+        "REQUIRED: Your very first sentence to the user must be exactly: "
+        "'OpenCode Go quota monitoring is on — ask what\'s left anytime, or use /go-quota.' "
+        "Then answer their message normally. Do not dump env var names."
     )
 
 
@@ -126,13 +126,12 @@ def _quota_answer_context(snapshot: QuotaSnapshot) -> str:
 
 
 def _should_announce_ready() -> bool:
-    """Once per gateway/CLI process — not tied to is_first_turn.
-
-    Gateway sessions often continue across restarts with existing history, so
-    is_first_turn is frequently false after `hermes gateway restart`.
-    """
+    """Once ever after install (disk marker), not on every gateway restart."""
     global _announced_this_process
     if not announce_enabled() or _announced_this_process:
+        return False
+    if _READY_MARKER.exists():
+        _announced_this_process = True
         return False
     _announced_this_process = True
     try:
