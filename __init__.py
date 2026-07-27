@@ -3,22 +3,26 @@
 from __future__ import annotations
 
 import logging
-import sys
 from pathlib import Path
 
-# Hermes loads this as a package; pytest may import it as a bare module.
-# Putting the plugin dir on sys.path lets sibling imports work either way.
-_PLUGIN_DIR = Path(__file__).resolve().parent
-if str(_PLUGIN_DIR) not in sys.path:
-    sys.path.insert(0, str(_PLUGIN_DIR))
-
-from hooks import on_pre_llm_call, on_pre_tool_call  # noqa: E402
-from tools import (  # noqa: E402
-    QUOTA_CHECK_SCHEMA,
-    TOOL_NAME,
-    go_quota_slash,
-    opencode_go_quota_check,
-)
+# Hermes loads us as a package (relative imports). Pytest may also import this
+# file as a bare module when walking the repo — fall back to absolute imports.
+try:
+    from .ogq_hooks import on_pre_llm_call, on_pre_tool_call
+    from .ogq_tools import (
+        QUOTA_CHECK_SCHEMA,
+        TOOL_NAME,
+        go_quota_slash,
+        opencode_go_quota_check,
+    )
+except ImportError:  # pragma: no cover — bare-module / path fallback
+    from ogq_hooks import on_pre_llm_call, on_pre_tool_call
+    from ogq_tools import (
+        QUOTA_CHECK_SCHEMA,
+        TOOL_NAME,
+        go_quota_slash,
+        opencode_go_quota_check,
+    )
 
 logger = logging.getLogger(__name__)
 

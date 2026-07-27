@@ -141,12 +141,26 @@ schedule a `cronjob` after reset.
 ## After install — is it working?
 
 1. `hermes plugins list` — `opencode-go-quota` should show **enabled**.
-2. Restart the gateway (see above).
-3. Send any message in Telegram/Discord/CLI — on the first turn Hermes should
-   mention that OpenCode Go quota monitoring is in place.
-4. Ask: **"What's my current quota?"** — you should get the spoken summary.
-5. If it fails: refresh the `auth` cookie, confirm workspace ID, then
-   `/go-quota refresh`.
+2. Confirm it actually loads (important):
+
+   ```bash
+   rg "opencode-go-quota" ~/.hermes/logs/errors.log | tail
+   ```
+
+   You should **not** see `Failed to load plugin 'opencode-go-quota'`.
+3. Restart the gateway, then send any chat message — on the **first turn of that
+   new process** Hermes should mention quota monitoring is in place.
+4. Ask: **"What's my current quota?"** — expect tool `opencode_go_quota_check`,
+   not skill `provider-usage-tracking`.
+5. Try slash **`/go-quota`**. If you get `Unknown command`, the plugin did not
+   load — check the log line above and re-run `hermes plugins update` / reinstall.
+
+### If Hermes still opens `provider-usage-tracking`
+
+That bundled skill wrongly says OpenCode Go has no API. This plugin’s
+`pre_llm_call` hook now intercepts quota questions and tells the model to call
+`opencode_go_quota_check` instead. After updating, restart the gateway so the
+hook is active.
 
 ## Develop / test
 

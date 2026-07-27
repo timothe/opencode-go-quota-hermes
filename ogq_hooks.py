@@ -1,26 +1,42 @@
-"""Warn, optional auto-block, and first-session ready announcement."""
+"""Warn, optional auto-block, ready announce, and quota-question routing."""
 
 from __future__ import annotations
 
 import os
+import re
 import time
 from pathlib import Path
 from typing import Any, Optional
 
-from quota.format import format_natural_summary
-from quota.types import QuotaSnapshot
-from tools import TOOL_NAME, get_snapshot
+try:
+    from .ogq_tools import TOOL_NAME, get_snapshot
+    from .quota.format import format_natural_summary
+    from .quota.types import QuotaSnapshot
+except ImportError:  # pragma: no cover
+    from ogq_tools import TOOL_NAME, get_snapshot
+    from quota.format import format_natural_summary
+    from quota.types import QuotaSnapshot
 
 DEFAULT_ALLOWLIST = (
     TOOL_NAME,
     "opencode_go_quota_check",
-    "quota_check",  # legacy alias if present
+    "quota_check",
     "cronjob",
     "memory",
     "session_search",
     "skill_view",
     "skills_list",
     "todo",
+)
+
+# Natural-language asks that should hit OpenCode Go quota — not other skills.
+_QUOTA_ASK_RE = re.compile(
+    r"(?i)\b("
+    r"quota|allowance|rate[\s-]?limit|"
+    r"(how\s+much|remaining|left).{0,40}(go|quota|allowance|usage)|"
+    r"(go|opencode).{0,40}(quota|limit|remaining|left|usage)|"
+    r"usage\s+limit"
+    r")\b"
 )
 
 _READY_MARKER = Path.home() / ".hermes" / "cache" / "opencode-go-quota-announced"
@@ -52,12 +68,12 @@ def block_allowlist() -> set[str]:
 def is_opencode_go_model(model: str) -> bool:
     m = (model or "").lower()
     if not m:
-        return True  # ambiguous — still warn when Go is likely in use
-    return (
-        "opencode-go" in m
-        or m.startswith("opencode-go")
-        or m.startswith("opencode/")
-    )
+        return True
+    return "opencode-go" in m or m.startswith("opencode-go") or m.startswith("opencode/")
+
+
+def looks_like_quota_question(user_message: str) -> bool:
+    return bool(_QUOTA_ASK_RE.search(user_message or ""))
 
 
 class InjectRateLimiter:
@@ -86,7 +102,6 @@ def _context_block(snapshot: QuotaSnapshot) -> str:
         f"{format_natural_summary(snapshot)} "
         "Prefer postponing non-urgent work via cronjob until after the tightest "
         "window resets, or switch to a fallback provider. "
-        "Load skill opencode-go-quota for the postpone playbook. "
         "This is OpenCode Go only — not OpenRouter or Zen billing."
     )
 
@@ -94,12 +109,22 @@ def _context_block(snapshot: QuotaSnapshot) -> str:
 def _ready_context() -> str:
     return (
         "[OpenCode Go quota plugin is active] "
-        "The opencode-go-quota plugin is loaded: it watches OpenCode Go "
-        "5-hour / weekly / monthly limits, can warn when low, and optionally "
-        "auto-block tools when critically low. "
-        "Briefly tell the user that OpenCode Go quota monitoring is in place, "
-        "and that they can ask naturally anytime — e.g. \"What's my current quota?\". "
+        "The opencode-go-quota plugin is loaded. Briefly tell the user that "
+        "OpenCode Go quota monitoring is in place, and that they can ask "
+        "\"What's my current quota?\" anytime (or use /go-quota). "
         "Do not dump env var names unless they ask how it works."
+    )
+
+
+def _quota_question_context() -> str:
+    return (
+        "[OpenCode Go quota routing] "
+        "The user is asking about remaining quota/allowance. "
+        "Call tool opencode_go_quota_check now and relay its natural-language "
+        "summary. "
+        "Do NOT load skill provider-usage-tracking for OpenCode Go — that skill "
+        "incorrectly says there is no API and only points at the web dashboard. "
+        "Do NOT send the user to opencode.ai/auth for this question."
     )
 
 
@@ -107,7 +132,6 @@ def _should_announce_ready(is_first_turn: bool) -> bool:
     global _announced_this_process
     if not announce_enabled() or not is_first_turn or _announced_this_process:
         return False
-    # Once per gateway/CLI process after restart (marker is process-lifetime only).
     _announced_this_process = True
     try:
         _READY_MARKER.parent.mkdir(parents=True, exist_ok=True)
@@ -135,6 +159,9 @@ def on_pre_llm_call(
 
     if _should_announce_ready(is_first_turn):
         chunks.append(_ready_context())
+
+    if looks_like_quota_question(user_message):
+        chunks.append(_quota_question_context())
 
     if is_opencode_go_model(model):
         try:

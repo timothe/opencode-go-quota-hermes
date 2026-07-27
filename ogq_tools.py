@@ -5,10 +5,16 @@ from __future__ import annotations
 import json
 from typing import Any, Optional
 
-from quota.cache import SnapshotCache, default_cache
-from quota.check import fetch_snapshot
-from quota.format import format_natural_summary, format_tool_guidance
-from quota.types import QuotaSnapshot
+try:
+    from .quota.cache import SnapshotCache, default_cache
+    from .quota.check import fetch_snapshot
+    from .quota.format import format_natural_summary, format_tool_guidance
+    from .quota.types import QuotaSnapshot
+except ImportError:  # pragma: no cover
+    from quota.cache import SnapshotCache, default_cache
+    from quota.check import fetch_snapshot
+    from quota.format import format_natural_summary, format_tool_guidance
+    from quota.types import QuotaSnapshot
 
 
 def get_snapshot(
@@ -38,7 +44,6 @@ def opencode_go_quota_check(args: Optional[dict[str, Any]] = None, **_: Any) -> 
     return f"{format_natural_summary(snapshot)}\n\n({format_tool_guidance()})"
 
 
-# Back-compat alias if anything still imports the old name.
 quota_check = opencode_go_quota_check
 
 
@@ -62,7 +67,6 @@ def go_quota_slash(raw_args: str = "") -> str:
 
 quota_slash = go_quota_slash
 
-
 TOOL_NAME = "opencode_go_quota_check"
 
 QUOTA_CHECK_SCHEMA: dict[str, Any] = {
@@ -70,11 +74,12 @@ QUOTA_CHECK_SCHEMA: dict[str, Any] = {
     "description": (
         "Check the user's OpenCode Go subscription quota only "
         "(5-hour rolling, weekly, and monthly windows on opencode.ai). "
-        "Use when they ask things like \"What's my current quota?\", "
-        "\"How much OpenCode Go do I have left?\", before long Go tasks, "
-        "or after Go 429/quota errors. "
-        "Returns a natural-language summary — relay it to the user in plain English; "
-        "do not confuse this with OpenRouter, Zen billing, or hermes insights."
+        "PREFERRED tool when the user asks about quota, remaining allowance, "
+        "or limits while using OpenCode Go — e.g. \"What's my current quota?\", "
+        "\"How much OpenCode Go do I have left?\". "
+        "Do NOT use provider-usage-tracking or send them to the web dashboard "
+        "for Go — this tool scrapes the live dashboard. "
+        "Returns natural-language prose to relay to the user."
     ),
     "parameters": {
         "type": "object",

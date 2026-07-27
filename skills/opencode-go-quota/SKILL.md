@@ -1,12 +1,12 @@
 ---
 name: opencode-go-quota
 description: >
-  OpenCode Go subscription quota only (5h / weekly / monthly). Use when the user
-  asks naturally about Go allowance ("What's my current quota?", "How much Go
-  do I have left?"), before long OpenCode Go tasks, or after Go 429/quota errors.
-  Not for OpenRouter, Zen billing, or hermes insights.
-version: 0.1.1
-tags: [opencode-go, quota, rate-limit, cron, postpone]
+  PREFERRED for OpenCode Go remaining quota / allowance / rate limits.
+  Use when the user asks "What's my current quota?", "remaining quota",
+  "how much Go left", or similar. Calls tool opencode_go_quota_check.
+  Do NOT use provider-usage-tracking for OpenCode Go.
+version: 0.1.2
+tags: [opencode-go, quota, allowance, rate-limit, cron, postpone]
 ---
 
 # OpenCode Go Quota
