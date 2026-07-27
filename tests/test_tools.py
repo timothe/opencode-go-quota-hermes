@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
+from pathlib import Path
 
 from plugin_loader import PACKAGE_NAME, load_plugin_module
 from tests.helpers import build_ssr_html
@@ -19,15 +20,30 @@ def test_quota_check_natural_language(monkeypatch):
     tools.default_cache.clear()
     html = build_ssr_html({"rolling": (10, 60), "weekly": (20, 120), "monthly": (30, 180)})
     scrape = sys.modules[f"{PACKAGE_NAME}.quota.scrape"]
+    billing_mod = sys.modules[f"{PACKAGE_NAME}.quota.billing"]
+    fixture = (
+        Path(__file__).parent / "fixtures" / "billing.html"
+    ).read_text(encoding="utf-8")
     monkeypatch.setattr(
         f"{PACKAGE_NAME}.quota.check.query_opencode_go_quota",
         lambda workspace_id, auth_cookie, opener=None, timeout_s=10: scrape.parse_dashboard_html(
             html
         ),
     )
+    monkeypatch.setattr(
+        f"{PACKAGE_NAME}.quota.check.query_opencode_billing",
+        lambda workspace_id, auth_cookie, opener=None, timeout_s=10: billing_mod.parse_billing_html(
+            fixture
+        ),
+    )
+    monkeypatch.setattr(
+        f"{PACKAGE_NAME}.quota.check.record_snapshot",
+        lambda *a, **k: False,
+    )
     out = tools.opencode_go_quota_check({})
     assert "OpenCode Go" in out
     assert "remaining" in out.lower()
+    assert "$20.00" in out or "Zen balance" in out
 
 
 def test_quota_check_json_opt_in(monkeypatch):
@@ -47,3 +63,20 @@ def test_quota_check_json_opt_in(monkeypatch):
 def test_go_quota_slash_help():
     help_text = _tools().go_quota_slash("help")
     assert "What's my current quota?" in help_text
+    assert "/go-balance" in help_text
+
+
+def test_go_balance_slash(monkeypatch):
+    tools = _tools()
+    types = sys.modules[f"{PACKAGE_NAME}.quota.types"]
+    snap = types.QuotaSnapshot(
+        status="ok",
+        windows={},
+        breached=[],
+        soonest_reset_at=None,
+        billing=types.BillingInfo(balance_usd=12.34, use_balance=False),
+    )
+    monkeypatch.setattr(tools, "get_snapshot", lambda force=False, **k: snap)
+    out = tools.go_balance_slash("")
+    assert "$12.34" in out
+    assert "is off" in out

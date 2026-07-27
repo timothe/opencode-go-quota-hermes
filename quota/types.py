@@ -28,6 +28,23 @@ class WindowUsage:
 
 
 @dataclass(frozen=True)
+class BillingInfo:
+    """Zen pay-as-you-go balance + Go overage toggle (from /billing)."""
+
+    balance_usd: float = 0.0
+    monthly_usage_usd: float = 0.0
+    monthly_limit_usd: float = 0.0
+    use_balance: Optional[bool] = None  # None = not found on page
+    auto_reload: bool = False
+    reload_amount_usd: float = 0.0
+    reload_trigger_usd: float = 0.0
+    error: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
 class QuotaSnapshot:
     status: StatusLevel
     windows: dict[WindowKey, WindowUsage]
@@ -35,6 +52,7 @@ class QuotaSnapshot:
     soonest_reset_at: Optional[str]
     message: str = ""
     error: str = ""
+    billing: Optional[BillingInfo] = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -44,4 +62,5 @@ class QuotaSnapshot:
             "soonest_reset_at": self.soonest_reset_at,
             "message": self.message,
             "error": self.error,
+            "billing": self.billing.to_dict() if self.billing else None,
         }

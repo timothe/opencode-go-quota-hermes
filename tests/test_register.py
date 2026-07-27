@@ -15,8 +15,10 @@ def test_register_wires_everything():
     hook_names = [c.args[0] for c in ctx.register_hook.call_args_list]
     assert "pre_llm_call" in hook_names
     assert "pre_tool_call" in hook_names
-    ctx.register_command.assert_called_once()
-    assert ctx.register_command.call_args.args[0] == "go-quota"
+    ctx.register_command.assert_called()
+    cmd_names = [c.args[0] for c in ctx.register_command.call_args_list]
+    assert "go-quota" in cmd_names
+    assert "go-balance" in cmd_names
     ctx.register_skill.assert_called_once()
     assert ctx.register_skill.call_args.args[0] == "opencode-go-quota"
 
@@ -34,3 +36,6 @@ def test_skill_frontmatter():
     assert "name: opencode-go-quota" in text
     assert "What's my current quota?" in text
     assert "opencode_go_quota_check" in text
+    assert "balance" in text.lower()
+
+

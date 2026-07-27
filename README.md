@@ -1,14 +1,18 @@
 # OpenCode Go Quota — Hermes plugin
 
 Track **OpenCode Go** subscription windows (5-hour / weekly / monthly), warn when
-a limit is near, optionally auto-block tools, and postpone work via Hermes cron.
+a limit is near, give **pace-aware** advice, optionally auto-block tools, and
+postpone work via Hermes cron. Also reports **Zen balance** and whether
+**Use-balance-after-Go-limits** is enabled (Go overage → Zen PAYG).
 
-This plugin is **OpenCode Go only**. It does not track OpenRouter, OpenCode Zen
-billing, Cursor, or local `hermes insights` token counts.
+This plugin is **OpenCode Go–scoped**. Zen balance is included only as the
+overage fallback for Go — it is not a full Zen billing manager. It does not
+track OpenRouter, Cursor, or local `hermes insights` token counts.
 
 There is **no official OpenCode Go usage API**. Quota is scraped from the
-workspace dashboard (approach inspired by
-[slkiser/opencode-quota](https://github.com/slkiser/opencode-quota), MIT).
+workspace `/go` dashboard; balance from `/billing` (same `auth` cookie).
+Approach inspired by [slkiser/opencode-quota](https://github.com/slkiser/opencode-quota)
+and [donrami/pi-go-bars](https://github.com/donrami/pi-go-bars) (MIT).
 
 ## Install
 
@@ -87,43 +91,56 @@ Tips:
 
 Environment variables override the file.
 
-## Asking for quota (natural language)
+## Asking for quota / balance (natural language)
 
 Simply ask Hermes:
 
 - "What's my current quota?"
 - "How much OpenCode Go do I have left?"
 - "Am I close to hitting the Go limit?"
+- "What's my remaining balance on OpenCode Go?"
+- "Is use balance after limits enabled?"
 
-You can also run slash **`/go-quota`** (or `/go-quota refresh`).
+Slash commands:
 
-Expect a spoken answer, for example:
+- **`/go-quota`** (or `/go-quota refresh`) — windows + pace (+ balance line)
+- **`/go-balance`** — Zen balance + Use-balance-after-Go-limits only
 
-> Your OpenCode Go quota is looking good for now: 100% remaining on the 5-hour
-> window (resets in about 5 hours), 100% remaining on the weekly window
-> (resets in about 6 days), and about 50% remaining on the monthly window
-> (resets on the 14th).
+Expect spoken answers that include remaining windows, whether burn is ahead of
+linear pace (e.g. 18% weekly after one day), and Zen balance when available.
+
+## Pace advice and local history
+
+Each successful live fetch appends a compact sample to
+`~/.hermes/cache/opencode-go-quota-history.jsonl` (no cookie / workspace id).
+Samples are deduped within an hour and retained for 90 days.
+
+- **Day one:** advice uses linear pace from `reset_in_sec` vs assumed window
+  lengths (5h / 7d / 30d) — no history required.
+- **After a few days:** trend advice can say burn is faster/slower than your
+  recent average within the current window cycle.
 
 ## What this plugin registers
 
 | Surface | Name | Purpose |
 | --- | --- | --- |
-| Tool | `opencode_go_quota_check` | Fetch Go quota; returns natural-language summary for the model |
-| Slash | `/go-quota` | Same summary on demand |
+| Tool | `opencode_go_quota_check` | Fetch Go quota (+ optional `balance=true`); natural-language summary |
+| Slash | `/go-quota` | Quota + pace (+ balance line) |
+| Slash | `/go-balance` | Zen balance + useBalance toggle |
 | Skill | `opencode-go-quota` | Postpone-via-cron playbook |
-| Hook | `pre_llm_call` | Warn when low; once-ever first-install notice; answer NL quota asks inline (bypasses Tool Search deferral) |
+| Hook | `pre_llm_call` | Warn when low; once-ever first-install notice; answer NL quota/balance asks inline |
 | Hook | `pre_tool_call` | Optional hard block when critically low |
 
 ### Avoiding conflicts with other skills/plugins
 
 | Prefer this plugin when… | Prefer something else when… |
 | --- | --- |
-| Question is about **OpenCode Go** plan windows | OpenRouter credits → OpenRouter usage API / other plugin |
-| Model provider is `opencode-go` | Zen **billing/balance** → separate Zen tooling |
-| User says “my quota” while on Go | Local token stats → `hermes insights` |
+| Question is about **OpenCode Go** plan windows or Go overage Zen balance | OpenRouter credits → OpenRouter usage API / other plugin |
+| Model provider is `opencode-go` | Full Zen account management beyond Go overage |
+| User says “my quota” / “Go balance” while on Go | Local token stats → `hermes insights` |
 
-Names are intentionally prefixed (`opencode_go_…`, `/go-quota`, skill
-`opencode-go-quota`) so they don’t collide with a generic `/quota` or
+Names are intentionally prefixed (`opencode_go_…`, `/go-quota`, `/go-balance`,
+skill `opencode-go-quota`) so they don’t collide with a generic `/quota` or
 `provider-usage-tracking`. If both skills are enabled, use **this** one for Go.
 
 ## Optional env
@@ -149,17 +166,16 @@ schedule a `cronjob` after reset.
    ```
 
    You should **not** see `Failed to load plugin 'opencode-go-quota'`.
-3. Restart the gateway, then send any chat message — on the **first turn of that
-   new process** Hermes should mention quota monitoring is in place.
-4. Ask: **"What's my current quota?"** — expect tool `opencode_go_quota_check`,
-   not skill `provider-usage-tracking`.
-5. Try slash **`/go-quota`**. If you get `Unknown command`, the plugin did not
-   load — check the log line above and re-run `hermes plugins update` / reinstall.
+3. Ask: **"What's my current quota?"** — expect a paced remaining-windows answer.
+4. Ask: **"What's my remaining balance on OpenCode Go?"** — expect Zen $ + useBalance.
+5. Try slash **`/go-quota`** and **`/go-balance`**. If you get `Unknown command`,
+   the plugin did not load — check the log line above and re-run
+   `hermes plugins update` / reinstall.
 
 ### If Hermes still opens `provider-usage-tracking`
 
 That bundled skill wrongly says OpenCode Go has no API. This plugin’s
-`pre_llm_call` hook intercepts quota questions, fetches quota itself, and
+`pre_llm_call` hook intercepts quota/balance questions, fetches data itself, and
 injects the answer into context (so it still works when Hermes Tool Search
 has deferred `opencode_go_quota_check`). After updating, restart the gateway.
 
@@ -175,4 +191,4 @@ No live network or cookies required for unit tests.
 
 ## License
 
-MIT. Dashboard scrape logic adapted from OpenCode Quota (MIT).
+MIT. Dashboard scrape logic adapted from OpenCode Quota / pi-go-bars (MIT).

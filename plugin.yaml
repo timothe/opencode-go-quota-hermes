@@ -1,10 +1,11 @@
 name: opencode-go-quota
-version: "0.1.2"
+version: "0.2.0"
 description: >
   OpenCode Go only — track 5h / weekly / monthly subscription quota by scraping
-  the opencode.ai workspace dashboard. Natural-language answers when you ask
-  "What's my current quota?". Warns via pre_llm_call; optional auto-block.
-  Does not cover OpenRouter, Zen billing, or hermes insights.
+  the opencode.ai workspace dashboard, plus Zen balance / Use-balance-after-Go-limits
+  from /billing. Pace-aware advice and local usage history. Natural-language answers
+  for quota and balance questions. Warns via pre_llm_call; optional auto-block.
+  Does not cover OpenRouter or hermes insights.
 author: timothe
 hooks:
   - pre_llm_call

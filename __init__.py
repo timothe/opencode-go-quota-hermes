@@ -12,6 +12,7 @@ try:
     from .ogq_tools import (
         QUOTA_CHECK_SCHEMA,
         TOOL_NAME,
+        go_balance_slash,
         go_quota_slash,
         opencode_go_quota_check,
     )
@@ -20,6 +21,7 @@ except ImportError:  # pragma: no cover — bare-module / path fallback
     from ogq_tools import (
         QUOTA_CHECK_SCHEMA,
         TOOL_NAME,
+        go_balance_slash,
         go_quota_slash,
         opencode_go_quota_check,
     )
@@ -39,7 +41,12 @@ def register(ctx) -> None:
     ctx.register_command(
         "go-quota",
         handler=go_quota_slash,
-        description="Show OpenCode Go quota (5h / weekly / monthly)",
+        description="Show OpenCode Go quota (5h / weekly / monthly) + pace",
+    )
+    ctx.register_command(
+        "go-balance",
+        handler=go_balance_slash,
+        description="Show Zen balance and Use-balance-after-Go-limits",
     )
 
     skills_dir = Path(__file__).parent / "skills"

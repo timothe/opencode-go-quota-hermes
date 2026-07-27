@@ -74,6 +74,14 @@ def test_fetch_snapshot_success(monkeypatch):
         def __exit__(self, *a):
             return False
 
-    snap = fetch_snapshot(opener=lambda req, timeout=10: Resp(), warn=20, critical=5)
+    snap = fetch_snapshot(
+        opener=lambda req, timeout=10: Resp(),
+        warn=20,
+        critical=5,
+        record_history=False,
+    )
     assert snap.status == "warn"
     assert "rolling" in snap.windows
+    assert snap.billing is not None
+    assert snap.billing.error  # go HTML is not a billing page
+

@@ -1,4 +1,4 @@
-"""Warn, optional auto-block, ready announce, and quota-question routing."""
+"""Warn, optional auto-block, ready announce, and quota/balance routing."""
 
 from __future__ import annotations
 
@@ -10,11 +10,11 @@ from typing import Any, Optional
 
 try:
     from .ogq_tools import TOOL_NAME, get_snapshot
-    from .quota.format import format_natural_summary
+    from .quota.format import format_balance_summary, format_natural_summary
     from .quota.types import QuotaSnapshot
 except ImportError:  # pragma: no cover
     from ogq_tools import TOOL_NAME, get_snapshot
-    from quota.format import format_natural_summary
+    from quota.format import format_balance_summary, format_natural_summary
     from quota.types import QuotaSnapshot
 
 DEFAULT_ALLOWLIST = (
@@ -29,13 +29,25 @@ DEFAULT_ALLOWLIST = (
     "todo",
 )
 
+# Balance / Zen PAYG / use-balance-after-limits (prefer over quota regex).
+_BALANCE_ASK_RE = re.compile(
+    r"(?i)\b("
+    r"balance|zen\s+credits?|"
+    r"use[\s-]?(?:your\s+)?(?:available\s+)?balance|"
+    r"(?:after|beyond).{0,30}(?:usage\s+)?limits?|"
+    r"(?:remaining|left).{0,20}balance|"
+    r"balance.{0,30}(?:opencode|go|zen)"
+    r")\b"
+)
+
 # Natural-language asks that should hit OpenCode Go quota — not other skills.
 _QUOTA_ASK_RE = re.compile(
     r"(?i)\b("
     r"quota|allowance|rate[\s-]?limit|"
     r"(how\s+much|remaining|left).{0,40}(go|quota|allowance|usage)|"
     r"(go|opencode).{0,40}(quota|limit|remaining|left|usage)|"
-    r"usage\s+limit"
+    r"usage\s+limit|"
+    r"\bpace\b|\bburn\b"
     r")\b"
 )
 
@@ -72,7 +84,13 @@ def is_opencode_go_model(model: str) -> bool:
     return "opencode-go" in m or m.startswith("opencode-go") or m.startswith("opencode/")
 
 
+def looks_like_balance_question(user_message: str) -> bool:
+    return bool(_BALANCE_ASK_RE.search(user_message or ""))
+
+
 def looks_like_quota_question(user_message: str) -> bool:
+    if looks_like_balance_question(user_message):
+        return False
     return bool(_QUOTA_ASK_RE.search(user_message or ""))
 
 
@@ -102,7 +120,7 @@ def _context_block(snapshot: QuotaSnapshot) -> str:
         f"{format_natural_summary(snapshot)} "
         "Prefer postponing non-urgent work via cronjob until after the tightest "
         "window resets, or switch to a fallback provider. "
-        "This is OpenCode Go only — not OpenRouter or Zen billing."
+        "This is OpenCode Go quota (+ Zen balance as Go overage fallback)."
     )
 
 
@@ -122,6 +140,22 @@ def _quota_answer_context(snapshot: QuotaSnapshot) -> str:
         "Relay this answer to the user in natural language. "
         "Do NOT say you lack a quota tool. Do NOT load provider-usage-tracking. "
         "Do NOT send them to the web dashboard for this."
+    )
+
+
+def _balance_answer_context(snapshot: QuotaSnapshot) -> str:
+    if snapshot.billing is None:
+        prose = (
+            "I couldn't read Zen balance (no billing data on this fetch). "
+            "Try /go-balance or refresh OPENCODE_GO_AUTH_COOKIE."
+        )
+    else:
+        prose = format_balance_summary(snapshot.billing)
+    return (
+        "[OpenCode Go / Zen balance — live result already fetched] "
+        f"{prose} "
+        "Relay this answer to the user in natural language. "
+        "Do NOT say you lack a balance tool. Do NOT send them to the dashboard."
     )
 
 
@@ -161,9 +195,17 @@ def on_pre_llm_call(
     if _should_announce_ready():
         chunks.append(_ready_context())
 
-    # Natural-language quota asks: fetch here so the answer works even when
-    # Tool Search has deferred opencode_go_quota_check behind tool_search.
-    if looks_like_quota_question(user_message):
+    # Balance asks first (otherwise "remaining … go" can match quota).
+    if looks_like_balance_question(user_message):
+        try:
+            snapshot = get_snapshot()
+            chunks.append(_balance_answer_context(snapshot))
+        except Exception:  # noqa: BLE001
+            chunks.append(
+                "[OpenCode Go balance] Could not fetch billing just now. "
+                "Ask the user to try /go-balance, or refresh OPENCODE_GO_AUTH_COOKIE."
+            )
+    elif looks_like_quota_question(user_message):
         try:
             snapshot = get_snapshot()
             chunks.append(_quota_answer_context(snapshot))
@@ -173,7 +215,10 @@ def on_pre_llm_call(
                 "Ask the user to try /go-quota, or refresh OPENCODE_GO_AUTH_COOKIE."
             )
 
-    if is_opencode_go_model(model) and not looks_like_quota_question(user_message):
+    asked = looks_like_balance_question(user_message) or looks_like_quota_question(
+        user_message
+    )
+    if is_opencode_go_model(model) and not asked:
         try:
             snapshot = get_snapshot()
         except Exception:  # noqa: BLE001

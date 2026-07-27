@@ -5,11 +5,14 @@ from __future__ import annotations
 import os
 from typing import Optional
 
+from .billing import query_opencode_billing
 from .config import resolve_config
+from .history import record_snapshot
 from .scrape import normalize_windows, query_opencode_go_quota
 from .types import (
     WINDOW_LABELS,
     WINDOW_ORDER,
+    BillingInfo,
     QuotaSnapshot,
     StatusLevel,
     WindowKey,
@@ -40,6 +43,7 @@ def classify_windows(
     *,
     warn: Optional[float] = None,
     critical: Optional[float] = None,
+    billing: Optional[BillingInfo] = None,
 ) -> QuotaSnapshot:
     if not windows:
         return QuotaSnapshot(
@@ -48,6 +52,7 @@ def classify_windows(
             breached=[],
             soonest_reset_at=None,
             error="No usage windows available",
+            billing=billing,
         )
 
     w = warn if warn is not None else warn_threshold()
@@ -96,6 +101,7 @@ def classify_windows(
         breached=breached,
         soonest_reset_at=soonest,
         message=message,
+        billing=billing,
     )
 
 
@@ -105,6 +111,7 @@ def fetch_snapshot(
     warn: Optional[float] = None,
     critical: Optional[float] = None,
     now_ms: Optional[float] = None,
+    record_history: bool = True,
 ) -> QuotaSnapshot:
     resolved = resolve_config()
     if resolved.state == "none":
@@ -137,6 +144,12 @@ def fetch_snapshot(
         resolved.config.auth_cookie,
         opener=opener,
     )
+    billing = query_opencode_billing(
+        resolved.config.workspace_id,
+        resolved.config.auth_cookie,
+        opener=opener,
+    )
+
     if not result.success:
         return QuotaSnapshot(
             status="error",
@@ -144,7 +157,13 @@ def fetch_snapshot(
             breached=[],
             soonest_reset_at=None,
             error=getattr(result, "error", "scrape failed"),
+            billing=billing,
         )
 
     windows = normalize_windows(result.windows, now_ms=now_ms)
-    return classify_windows(windows, warn=warn, critical=critical)
+    snapshot = classify_windows(
+        windows, warn=warn, critical=critical, billing=billing
+    )
+    if record_history:
+        record_snapshot(snapshot)
+    return snapshot

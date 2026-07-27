@@ -3,9 +3,18 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional
 
-from .types import WINDOW_LABELS, WINDOW_ORDER, QuotaSnapshot, WindowKey, WindowUsage
+from .history import format_trend_advice
+from .pace import assess_all_paces, format_pace_advice, primary_pace_tone
+from .types import (
+    WINDOW_ORDER,
+    BillingInfo,
+    QuotaSnapshot,
+    WindowKey,
+    WindowUsage,
+)
 
 # Spoken labels used in prose (not machine keys).
 PROSE_LABELS: dict[WindowKey, str] = {
@@ -69,10 +78,52 @@ def _pct(remaining: float) -> str:
     return f"{remaining:.1f}%"
 
 
+def format_usd(amount: float) -> str:
+    return f"${amount:,.2f}"
+
+
+def format_balance_summary(billing: BillingInfo) -> str:
+    """Prose for Zen balance + Go use-balance-after-limits toggle."""
+    if billing.error:
+        return (
+            "I couldn't read your OpenCode Zen balance just now "
+            f"({billing.error}). "
+            "Refresh OPENCODE_GO_AUTH_COOKIE from opencode.ai and try again."
+        )
+
+    parts = [f"Your OpenCode Zen balance is {format_usd(billing.balance_usd)}"]
+    if billing.monthly_limit_usd > 0:
+        parts.append(
+            f"this month's Zen spend is {format_usd(billing.monthly_usage_usd)} "
+            f"of a {format_usd(billing.monthly_limit_usd)} monthly cap"
+        )
+    body = parts[0] if len(parts) == 1 else f"{parts[0]}; {parts[1]}"
+
+    if billing.use_balance is True:
+        toggle = (
+            "Use-balance-after-Go-limits is on — when Go quota windows are "
+            "exhausted, usage falls back to this Zen balance"
+        )
+    elif billing.use_balance is False:
+        toggle = (
+            "Use-balance-after-Go-limits is off — hitting Go quota windows "
+            "will block requests instead of drawing from Zen balance"
+        )
+    else:
+        toggle = (
+            "Could not tell whether Use-balance-after-Go-limits is enabled "
+            "from the billing page"
+        )
+
+    return f"{body}. {toggle}."
+
+
 def format_natural_summary(
     snapshot: QuotaSnapshot,
     *,
     now: Optional[datetime] = None,
+    history_path: Optional[Path] = None,
+    include_balance: bool = True,
 ) -> str:
     """Prose summary the model can relay to the user."""
     if snapshot.status in {"error", "incomplete"}:
@@ -105,26 +156,49 @@ def format_natural_summary(
     else:
         body = ", ".join(parts[:-1]) + f", and {parts[-1]}"
 
-    if snapshot.status == "ok":
-        lead = "Your OpenCode Go quota is looking good for now"
+    paces = assess_all_paces(snapshot.windows)
+    tone = primary_pace_tone(paces)
+
+    if snapshot.status == "critical":
+        lead = "Your OpenCode Go quota is critically low"
     elif snapshot.status == "warn":
         lead = "Your OpenCode Go quota is getting low"
-    else:  # critical
-        lead = "Your OpenCode Go quota is critically low"
+    elif tone == "ahead":
+        lead = "Your OpenCode Go quota still has room, but burn is ahead of pace"
+    elif tone == "under":
+        lead = "Your OpenCode Go quota is comfortable and under pace so far"
+    else:
+        lead = "Your OpenCode Go quota is on a reasonable pace for now"
 
-    advice = ""
+    advice_bits: list[str] = []
+    pace_text = format_pace_advice(paces)
+    if pace_text:
+        advice_bits.append(pace_text.rstrip("."))
+
+    trend = format_trend_advice(snapshot, path=history_path, now=now)
+    if trend:
+        advice_bits.append(trend.rstrip("."))
+
     if snapshot.status in {"warn", "critical"}:
-        advice = (
-            " Consider postponing non-urgent work until the tightest window "
-            "resets, or switch to a fallback provider if you need to continue now."
+        advice_bits.append(
+            "Consider postponing non-urgent work until the tightest window "
+            "resets, or switch to a fallback provider if you need to continue now"
         )
 
-    return f"{lead}: {body}.{advice}"
+    text = f"{lead}: {body}."
+    if advice_bits:
+        text += " " + ". ".join(advice_bits) + "."
+
+    if include_balance and snapshot.billing and not snapshot.billing.error:
+        text += " " + format_balance_summary(snapshot.billing)
+
+    return text
 
 
 def format_tool_guidance() -> str:
     return (
-        "This is OpenCode Go subscription quota only (not OpenRouter, Zen billing, "
-        "or hermes insights). Reply to the user in natural language using this "
-        "summary — do not dump ISO timestamps or raw JSON."
+        "This is OpenCode Go subscription quota (and Zen balance as Go overage "
+        "fallback) — not OpenRouter or hermes insights. Reply to the user in "
+        "natural language using this summary — do not dump ISO timestamps or "
+        "raw JSON."
     )
