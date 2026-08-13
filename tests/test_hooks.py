@@ -47,7 +47,34 @@ def test_looks_like_balance_question():
     assert hooks.looks_like_balance_question(
         "Did I enable use balance after reaching the usage limits?"
     )
+    assert hooks.looks_like_balance_question("Check my balance")
+    assert hooks.looks_like_balance_question("How much balance do I have left?")
     assert not hooks.looks_like_balance_question("What's my remaining quota?")
+
+
+def test_bare_balance_verb_is_not_a_balance_ask():
+    """Regression: 'you balance effectiveness with fun mood' is a verb, not billing."""
+    hooks = _hooks()
+    assert not hooks.looks_like_balance_question(
+        "You balance effectiveness with fun mood, not forced."
+    )
+    assert not hooks.looks_like_balance_question(
+        "I need to balance my time between projects."
+    )
+    assert not hooks.looks_like_balance_question(
+        "Good on usage, thanks — didn't ask for anything."
+    )
+
+
+def test_quoted_reply_does_not_retrigger_balance_fetch():
+    """Regression: quoting our own answer (which mentions balance) must not fire."""
+    hooks = _hooks()
+    msg = '[Replying to: "There\'s a stray block claiming to be an OpenCode Zen balance report ($19.70, $0 spent of $20 cap)"] is that a bug?'
+    assert not hooks.looks_like_balance_question(msg)
+    assert not hooks.looks_like_quota_question(msg)
+    # And after strip, the actual ask is not a balance/quota question either.
+    assert not hooks.looks_like_balance_question(hooks._strip_reply_quote(msg))
+    assert not hooks.looks_like_quota_question(hooks._strip_reply_quote(msg))
 
 
 def test_quota_question_injects_live_answer(monkeypatch):

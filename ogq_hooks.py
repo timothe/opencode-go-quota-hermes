@@ -30,9 +30,14 @@ DEFAULT_ALLOWLIST = (
 )
 
 # Balance / Zen PAYG / use-balance-after-limits (prefer over quota regex).
+# NOTE: bare "balance" is intentionally NOT a trigger — it's a common English
+# verb ("you balance effectiveness with fun mood"). Require financial phrasing.
 _BALANCE_ASK_RE = re.compile(
     r"(?i)\b("
-    r"balance|zen\s+credits?|"
+    r"(?:my|the|account|zen|opencode|go|available)\s+balance|"
+    r"balance\s+(?:on|of|left|remaining|shows?|is|in|at|usd)|"
+    r"(?:remaining|left|check|see|show|how\s+much)\s+balance|"
+    r"zen\s+credits?|"
     r"use[\s-]?(?:your\s+)?(?:available\s+)?balance|"
     r"(?:after|beyond).{0,30}(?:usage\s+)?limits?|"
     r"(?:remaining|left).{0,20}balance|"
@@ -45,11 +50,20 @@ _QUOTA_ASK_RE = re.compile(
     r"(?i)\b("
     r"quota|allowance|rate[\s-]?limit|"
     r"(how\s+much|remaining|left).{0,40}(go|quota|allowance|usage)|"
-    r"(go|opencode).{0,40}(quota|limit|remaining|left|usage)|"
+    r"(?:go|opencode)\b.{0,40}(?:quota|limit|remaining|left|usage)|"
     r"usage\s+limit|"
     r"\bpace\b|\bburn\b"
     r")\b"
 )
+
+# Telegram prefixes quoted replies with [Replying to: "..."]. Strip that block
+# so quoting our own previous answer (which may mention balance/quota) can't
+# re-trigger a fetch+inject on a message that isn't actually asking.
+_REPLY_QUOTE_RE = re.compile(r"\[Replying to: \"(?:[^\"\\]|\\.)*\"\]", re.DOTALL)
+
+
+def _strip_reply_quote(user_message: str) -> str:
+    return _REPLY_QUOTE_RE.sub("", user_message or "").strip()
 
 _READY_MARKER = Path.home() / ".hermes" / "cache" / "opencode-go-quota-announced"
 _announced_this_process = False
@@ -85,13 +99,13 @@ def is_opencode_go_model(model: str) -> bool:
 
 
 def looks_like_balance_question(user_message: str) -> bool:
-    return bool(_BALANCE_ASK_RE.search(user_message or ""))
+    return bool(_BALANCE_ASK_RE.search(_strip_reply_quote(user_message)))
 
 
 def looks_like_quota_question(user_message: str) -> bool:
     if looks_like_balance_question(user_message):
         return False
-    return bool(_QUOTA_ASK_RE.search(user_message or ""))
+    return bool(_QUOTA_ASK_RE.search(_strip_reply_quote(user_message)))
 
 
 class InjectRateLimiter:
@@ -191,6 +205,10 @@ def on_pre_llm_call(
     **_: Any,
 ) -> Optional[dict[str, str]]:
     chunks: list[str] = []
+
+    # Telegram quoted-reply prefixes carry our own previous text; strip them so
+    # quoting an answer that mentions balance/quota doesn't re-trigger a fetch.
+    user_message = _strip_reply_quote(user_message)
 
     if _should_announce_ready():
         chunks.append(_ready_context())
