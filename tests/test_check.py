@@ -51,6 +51,7 @@ def test_classify_empty_incomplete():
 
 
 def test_fetch_snapshot_missing_config(monkeypatch):
+    monkeypatch.delenv("OPENCODE_GO_API_KEY", raising=False)
     monkeypatch.delenv("OPENCODE_GO_WORKSPACE_ID", raising=False)
     monkeypatch.delenv("OPENCODE_GO_AUTH_COOKIE", raising=False)
     snap = fetch_snapshot()
@@ -58,6 +59,7 @@ def test_fetch_snapshot_missing_config(monkeypatch):
 
 
 def test_fetch_snapshot_success(monkeypatch):
+    monkeypatch.delenv("OPENCODE_GO_API_KEY", raising=False)
     monkeypatch.setenv("OPENCODE_GO_WORKSPACE_ID", "ws")
     monkeypatch.setenv("OPENCODE_GO_AUTH_COOKIE", "tok")
     html = build_ssr_html({"rolling": (90, 60)})  # 10% remaining → warn at 20
@@ -83,5 +85,5 @@ def test_fetch_snapshot_success(monkeypatch):
     assert snap.status == "warn"
     assert "rolling" in snap.windows
     assert snap.billing is not None
-    assert snap.billing.error  # go HTML is not a billing page
+    assert snap.billing.error  # dashboard HTML is not a console JSON response
 

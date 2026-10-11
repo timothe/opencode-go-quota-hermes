@@ -6,7 +6,7 @@ description: >
   Use when the user asks "What's my current quota?", "remaining balance on
   OpenCode Go", or similar. Calls tool opencode_go_quota_check.
   Do NOT use provider-usage-tracking for OpenCode Go.
-version: 0.2.0
+version: 0.4.0
 tags: [opencode-go, quota, balance, allowance, rate-limit, cron, postpone]
 ---
 
@@ -16,8 +16,10 @@ This skill is **scoped to OpenCode Go** (`opencode.ai` Go plan windows) plus
 **Zen balance as Go overage fallback** (Use-balance-after-Go-limits).
 It does **not** replace OpenRouter usage or `hermes insights`.
 
-OpenCode Go has **no official usage API**. The plugin scrapes the workspace
-`/go` and `/billing` dashboards and exposes tool `opencode_go_quota_check`,
+Quota comes from the **official Go usage API** (`/zen/go/v1/usage`) using the Go
+API key — no browser cookie needed. Zen balance reads the **console JSON APIs**
+(`/console/api/billing/status`, `/console/api/go/status`) with the `auth` cookie
+or a console bearer token. The plugin exposes tool `opencode_go_quota_check`,
 slash `/go-quota`, and slash `/go-balance`.
 
 ## How the user asks (natural)
@@ -41,12 +43,16 @@ when enough local history exists, **trend vs recent burn**.
 
 Set at `hermes plugins install` or in `~/.hermes/.env`:
 
-- `OPENCODE_GO_WORKSPACE_ID` — from `https://opencode.ai/workspace/{id}/go`
-- `OPENCODE_GO_AUTH_COOKIE` — browser cookie named `auth` on `opencode.ai`
+- `OPENCODE_GO_API_KEY` — Go API key. **Quota source** (bearer token against
+  `/zen/go/v1/usage`). No browser session needed.
+- `OPENCODE_GO_AUTH_COOKIE` — browser cookie named `auth` on `opencode.ai`.
+  **Zen balance source** (console JSON APIs).
+- `OPENCODE_GO_CONSOLE_TOKEN` — optional console bearer token, used instead of
+  the cookie when set. `OPENCODE_GO_ORG_ID` adds `x-org-id` for org-scoped logins.
+- `OPENCODE_GO_WORKSPACE_ID` — only used by the deprecated dashboard-scrape
+  fallback and to scope billing lookups.
 
-**API key ≠ quota.** `OPENCODE_GO_API_KEY` does not expose limits.
-
-Cookie walkthrough: see the plugin README ("Getting your workspace ID and auth cookie").
+Cookie walkthrough: see the plugin README ("Auth").
 
 ## Optional env
 
@@ -72,7 +78,30 @@ If both skills are enabled, prefer **this** skill for OpenCode Go questions.
 3. If getting low, critical, or ahead of pace:
    - Propose postpone via Hermes `cronjob` after the tightest window resets.
    - Continue now only if the user opts in (fallback provider, Zen balance if enabled, or accept burn).
-4. If the check fails: ask them to refresh the `auth` cookie.
+4. If the check fails: read the error. "usage API" → check `OPENCODE_GO_API_KEY`.
+   Otherwise ask them to refresh the `auth` cookie.
+
+## Maintenance — the console moved, the cookie is optional
+
+opencode.ai migrated the console to a client-rendered SPA (`/console/*`), which
+killed the old dashboard scrape: `/workspace/{id}/go` now 302s to
+`/console/login` and the SSR usage markup is gone. Do not chase a fresh `auth`
+cookie to fix a quota failure.
+
+- **Quota source of truth:** `GET https://opencode.ai/zen/go/v1/usage` with
+  `Authorization: Bearer $OPENCODE_GO_API_KEY`. Returns
+  `usage.{rolling,weekly,monthly}` = `{status, percent, resetsAt}`; `percent` is
+  *used*. Probe it first when quota breaks:
+  `curl -s https://opencode.ai/zen/go/v1/usage -H "Authorization: Bearer $OPENCODE_GO_API_KEY"`.
+  A 401 means the key, not the cookie.
+- **Cookie only affects Zen balance.** Balance reads the console JSON APIs
+  (`/console/api/billing/status`, `/console/api/billing/auto-recharge`,
+  `/console/api/go/status`; microcents = dollars x 1e8). Those answer 401 for a
+  stale cookie and 403 for the Go API key, so balance is always the cookie/token
+  half. Balance failing is not a quota problem — quota still answers.
+- **The console API** (`/console/api/go/status`) is also where `useBalance` and
+  the Go window money meters live; it is member-scoped to the session.
+- Any fix to plugin code is inert in a running gateway until `/restart`.
 
 ## Postpone via cron (example)
 

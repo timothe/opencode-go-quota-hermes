@@ -6,6 +6,7 @@ Fetches workspace Go page and parses rolling / weekly / monthly usage.
 
 from __future__ import annotations
 
+import json
 import re
 import urllib.error
 import urllib.request
@@ -17,6 +18,8 @@ from .types import WINDOW_ORDER, WindowKey, WindowUsage
 
 DASHBOARD_URL_PREFIX = "https://opencode.ai/workspace/"
 DASHBOARD_URL_SUFFIX = "/go"
+# Official Go usage API. Works with the Go inference API key (no browser cookie).
+USAGE_API_URL = "https://opencode.ai/zen/go/v1/usage"
 USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
     "Gecko/20100101 Firefox/148.0"
@@ -245,4 +248,129 @@ def query_opencode_go_quota(
             error=f"OpenCode Go dashboard error {exc.code}: {_sanitize(body)}"
         )
     except Exception as exc:  # noqa: BLE001 — surface any transport failure
+        return ScrapeErr(error=_sanitize(str(exc)))
+
+
+# --- Official Go usage API (/zen/go/v1/usage) -------------------------------
+#
+# The console dashboard moved to a client-rendered SPA, so the HTML scrape above
+# only works against the retired SSR pages. The usage API needs the Go inference
+# API key as a bearer token and returns:
+#   {"usage": {"rolling": {"status": "ok"|"rate-limited", "percent": 0-100,
+#                          "resetsAt": "<ISO-8601>"}, "weekly": {...}, "monthly": {...}}}
+
+
+def _iso_to_epoch_seconds(value: object) -> Optional[float]:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = value.strip()
+    if text.endswith(("Z", "z")):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.timestamp()
+
+
+def parse_usage_api_payload(
+    payload: object,
+    *,
+    now_ms: Optional[float] = None,
+) -> ScrapeResult:
+    if not isinstance(payload, dict):
+        return ScrapeErr(error="OpenCode Go usage API: response root is not an object")
+    usage = payload.get("usage")
+    if not isinstance(usage, dict):
+        return ScrapeErr(error="OpenCode Go usage API: no 'usage' object in response")
+
+    now_s = (
+        now_ms if now_ms is not None else datetime.now(timezone.utc).timestamp() * 1000
+    ) / 1000.0
+
+    windows: dict[WindowKey, ScrapedWindow] = {}
+    for key in WINDOW_ORDER:
+        raw = usage.get(key)
+        if raw is None:
+            continue
+        if not isinstance(raw, dict):
+            return ScrapeErr(
+                error=f"OpenCode Go usage API: {key} window is malformed"
+            )
+        percent = raw.get("percent")
+        if isinstance(percent, bool) or not isinstance(percent, (int, float)):
+            return ScrapeErr(
+                error=f"OpenCode Go usage API: {key} percent is missing or not a number"
+            )
+        percent = float(percent)
+        if percent != percent:  # NaN
+            return ScrapeErr(error=f"OpenCode Go usage API: {key} percent is NaN")
+        reset_epoch = _iso_to_epoch_seconds(raw.get("resetsAt"))
+        if reset_epoch is None:
+            return ScrapeErr(
+                error=f"OpenCode Go usage API: {key} resetsAt is missing or invalid"
+            )
+        if str(raw.get("status") or "") == "rate-limited":
+            percent = 100.0
+        windows[key] = ScrapedWindow(
+            usage_percent=max(0.0, min(100.0, percent)),
+            reset_in_sec=max(0.0, reset_epoch - now_s),
+        )
+
+    if not windows:
+        return ScrapeErr(error="OpenCode Go usage API: response carried no usage windows")
+    return ScrapeOk(windows=windows)
+
+
+def query_opencode_go_usage_api(
+    api_key: str,
+    *,
+    timeout_s: float = DEFAULT_TIMEOUT_S,
+    opener: Optional[FetchFn] = None,
+) -> ScrapeResult:
+    """Read Go windows from the official usage API using the Go API key."""
+    req = urllib.request.Request(
+        USAGE_API_URL,
+        method="GET",
+        headers={
+            "User-Agent": USER_AGENT,
+            "Accept": "application/json",
+            "Authorization": f"Bearer {api_key}",
+        },
+    )
+    fetch = opener or urllib.request.urlopen
+    try:
+        with fetch(req, timeout=timeout_s) as resp:  # type: ignore[arg-type]
+            status = getattr(resp, "status", None) or resp.getcode()
+            body = resp.read()
+            text = (
+                body.decode("utf-8", errors="replace")
+                if isinstance(body, bytes)
+                else str(body)
+            )
+            if int(status) < 200 or int(status) >= 300:
+                return ScrapeErr(
+                    error=f"OpenCode Go usage API error {status}: {_sanitize(text)}"
+                )
+            try:
+                payload = json.loads(text)
+            except ValueError:
+                return ScrapeErr(
+                    error=(
+                        "OpenCode Go usage API returned non-JSON: "
+                        f"{_sanitize(text, 60)}"
+                    )
+                )
+            return parse_usage_api_payload(payload)
+    except urllib.error.HTTPError as exc:
+        try:
+            body = exc.read().decode("utf-8", errors="replace")
+        except Exception:
+            body = str(exc.reason)
+        return ScrapeErr(
+            error=f"OpenCode Go usage API error {exc.code}: {_sanitize(body)}"
+        )
+    except Exception as exc:  # noqa: BLE001
         return ScrapeErr(error=_sanitize(str(exc)))

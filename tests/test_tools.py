@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import sys
-from pathlib import Path
 
 from plugin_loader import PACKAGE_NAME, load_plugin_module
 from tests.helpers import build_ssr_html
@@ -21,9 +20,6 @@ def test_quota_check_natural_language(monkeypatch):
     html = build_ssr_html({"rolling": (10, 60), "weekly": (20, 120), "monthly": (30, 180)})
     scrape = sys.modules[f"{PACKAGE_NAME}.quota.scrape"]
     billing_mod = sys.modules[f"{PACKAGE_NAME}.quota.billing"]
-    fixture = (
-        Path(__file__).parent / "fixtures" / "billing.html"
-    ).read_text(encoding="utf-8")
     monkeypatch.setattr(
         f"{PACKAGE_NAME}.quota.check.query_opencode_go_quota",
         lambda workspace_id, auth_cookie, opener=None, timeout_s=10: scrape.parse_dashboard_html(
@@ -32,8 +28,8 @@ def test_quota_check_natural_language(monkeypatch):
     )
     monkeypatch.setattr(
         f"{PACKAGE_NAME}.quota.check.query_opencode_billing",
-        lambda workspace_id, auth_cookie, opener=None, timeout_s=10: billing_mod.parse_billing_html(
-            fixture
+        lambda auth_cookie="", console_token="", org_id="", opener=None, timeout_s=10: billing_mod.parse_billing_status(
+            {"balanceMicroCents": 2000000000, "mode": "pay-as-you-go"}
         ),
     )
     monkeypatch.setattr(

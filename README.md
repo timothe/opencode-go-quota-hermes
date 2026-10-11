@@ -9,9 +9,14 @@ This plugin is **OpenCode Go–scoped**. Zen balance is included only as the
 overage fallback for Go — it is not a full Zen billing manager. It does not
 track OpenRouter, Cursor, or local `hermes insights` token counts.
 
-There is **no official OpenCode Go usage API**. Quota is scraped from the
-workspace `/go` dashboard; balance from `/billing` (same `auth` cookie).
-Approach inspired by [slkiser/opencode-quota](https://github.com/slkiser/opencode-quota)
+Quota comes from the **official Go usage API**
+(`https://opencode.ai/zen/go/v1/usage`) using your Go API key as a bearer token —
+no browser session, no scraping. Zen balance comes from the console billing JSON
+APIs (`/console/api/billing/status`, `/console/api/go/status`) and needs a signed-in
+console session (browser `auth` cookie or a console bearer token). The old
+dashboard-scrape path is kept as a legacy fallback. Scrape/parse ideas for the
+legacy path came from
+[slkiser/opencode-quota](https://github.com/slkiser/opencode-quota)
 and [donrami/pi-go-bars](https://github.com/donrami/pi-go-bars) (MIT).
 
 ## Install
@@ -21,8 +26,8 @@ hermes plugins install timothe/opencode-go-quota-hermes --enable
 ```
 
 Hermes clones the repo (keeps `.git`, so later `hermes plugins update` works),
-prompts for workspace ID and auth cookie, saves them to `~/.hermes/.env`, then
-enables the plugin.
+prompts for the Go API key (and optionally workspace ID / auth cookie), saves
+them to `~/.hermes/.env`, then enables the plugin.
 
 If you previously installed a subdirectory path (`…/opencode-go-quota`) and
 `hermes plugins update` says “no .git directory”, force-reinstall once:
@@ -50,37 +55,69 @@ hermes plugins update opencode-go-quota
 hermes gateway restart
 ```
 
-## Getting your workspace ID and auth cookie
+## Auth
 
-OpenCode Go does not expose quota on the API key. You need a signed-in browser
-session cookie.
+### Quota — Go API key (primary)
 
-### 1. Workspace ID
+Quota reads `https://opencode.ai/zen/go/v1/usage` with `OPENCODE_GO_API_KEY` as a
+bearer token:
 
-1. Sign in at [https://opencode.ai/auth](https://opencode.ai/auth).
-2. Open your **Go** usage page. The URL looks like:
+```json
+{
+  "usage": {
+    "rolling": {"status": "ok", "percent": 0,  "resetsAt": "2026-10-11T13:01:09.000Z"},
+    "weekly":  {"status": "ok", "percent": 46, "resetsAt": "2026-10-12T00:00:00.000Z"},
+    "monthly": {"status": "ok", "percent": 82, "resetsAt": "2026-10-14T21:34:50.000Z"}
+  }
+}
+```
 
-   `https://opencode.ai/workspace/abc123xyz/go`
+`percent` is *used* percentage. `status: "rate-limited"` pins the window to 100%
+used. No cookie, no workspace ID, and it survives sign-outs.
 
-3. Copy only the middle segment (`abc123xyz`) — that is `OPENCODE_GO_WORKSPACE_ID`.
-4. Do **not** paste the full URL or your API key.
+### Zen balance — console session (optional)
 
-### 2. Auth cookie
+`/go-balance` and the balance line in quota summaries read the console JSON APIs:
 
-1. Stay signed in on [https://opencode.ai](https://opencode.ai).
-2. Open DevTools:
+| Endpoint | Gives |
+| --- | --- |
+| `GET /console/api/billing/status` | `balanceMicroCents`, `availableMicroCents`, `mode` |
+| `GET /console/api/billing/auto-recharge` | auto-recharge toggle, threshold, amount (dollars) |
+| `GET /console/api/go/status` | `useBalance` toggle + Go window money meters |
+
+Microcents are `dollars x 1e8`. These are cookie-authenticated: the Go API key
+gets a 403, a dead session gets 401. Two ways to authenticate:
+
+**1. Browser cookie (default).** Stay signed in on [https://opencode.ai](https://opencode.ai), then:
+
+1. Open DevTools:
    - **Chrome / Edge / Brave:** `F12` or right-click → Inspect → **Application**
    - **Firefox:** `F12` → **Storage**
-3. Sidebar: **Cookies** → `https://opencode.ai`
-4. Find the cookie named exactly **`auth`** (not other cookies).
-5. Copy its **Value** (a long opaque string) into `OPENCODE_GO_AUTH_COOKIE`.
+2. Sidebar: **Cookies** → `https://opencode.ai`
+3. Find the cookie named exactly **`auth`** (not other cookies).
+4. Copy its **Value** (a long opaque string) into `OPENCODE_GO_AUTH_COOKIE`.
+
+**2. Console bearer token (alternative, longer-lived).** Set
+`OPENCODE_GO_CONSOLE_TOKEN` to an OpenCode Console access token (`opencode auth
+login opencode` stores one under the `opencode` integration; the access token is
+sent as `Authorization: Bearer`). Set `OPENCODE_GO_ORG_ID` too if the login is
+org-scoped. A bearer token wins over the cookie when both are set. Not verified
+live on this machine — the cookie path is the one that has been exercised.
 
 Tips:
 
-- Cookie expires when you sign out or after idle time. If checks start failing,
-  re-copy `auth` and update `~/.hermes/.env`.
-- Never commit the cookie to git or paste it into public chats.
-- `OPENCODE_GO_API_KEY` is for inference only — it cannot read quota.
+- The cookie expires when you sign out or after idle time. If balance checks
+  start failing with `console session rejected (401)`, re-copy `auth`.
+- Never commit either credential to git or paste it into public chats.
+- The workspace ID (`https://opencode.ai/workspace/{id}/go`) is only needed for
+  the legacy dashboard-scrape fallback.
+
+### Legacy dashboard scrape (deprecated)
+
+If no API key is set, the plugin falls back to scraping
+`https://opencode.ai/workspace/{id}/go` with the `auth` cookie. The console moved
+to a client-rendered SPA, so this path only works if opencode.ai ever serves the
+old SSR page again.
 
 ### Config file alternative
 

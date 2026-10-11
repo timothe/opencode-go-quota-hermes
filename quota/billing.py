@@ -1,164 +1,238 @@
-"""OpenCode workspace /billing scraper (Zen balance + useBalance).
+"""OpenCode Console billing client: Zen balance + Go use-balance toggle.
 
-Pattern ported from donrami/pi-go-bars (MIT) parseBilling.
+The old `/workspace/{id}/billing` SSR page is gone. opencode.ai now serves a
+console SPA backed by JSON APIs under `/console/api`, so balance comes from:
+
+  GET /console/api/billing/status        balanceMicroCents, availableMicroCents, mode
+  GET /console/api/billing/auto-recharge auto-recharge settings (plain dollars)
+  GET /console/api/go/status             useBalance + Go window meters
+
+All three need the browser session cookie named `auth`. The Go API key cannot
+read billing (the console answers 403 for a bearer key, 401 for a dead cookie),
+so this half of the plugin stays cookie-based while quota runs on the API key.
 """
 
 from __future__ import annotations
 
-import re
+import json
 import urllib.error
 import urllib.request
-from typing import Callable, Optional
+from dataclasses import replace
+from typing import Any, Callable, Optional
 
 from .scrape import DEFAULT_TIMEOUT_S, USER_AGENT, _sanitize
 from .types import BillingInfo
 
-BILLING_URL_PREFIX = "https://opencode.ai/workspace/"
-BILLING_URL_SUFFIX = "/billing"
-MICROCENTS = 1e8
-
-_RE_BALANCE = re.compile(r"balance:(-?\d+(?:\.\d+)?)")
-_RE_MONTHLY_USAGE = re.compile(r"monthlyUsage:(-?\d+(?:\.\d+)?)")
-_RE_MONTHLY_LIMIT = re.compile(r"monthlyLimit:(-?\d+(?:\.\d+)?)")
-_RE_RELOAD = re.compile(r"reload:(!0|!1|true|false|null)")
-_RE_RELOAD_AMOUNT = re.compile(r"reloadAmount:(-?\d+(?:\.\d+)?)")
-_RE_RELOAD_TRIGGER = re.compile(r"reloadTrigger:(-?\d+(?:\.\d+)?)")
-_RE_USE_BALANCE = re.compile(r"useBalance:(!0|!1|true|false)")
-
-
-def _parse_solid_bool(raw: str) -> bool:
-    if raw in {"!0", "true"}:
-        return True
-    if raw in {"!1", "false", "null"}:
-        return False
-    try:
-        return float(raw) != 0.0
-    except ValueError:
-        return False
-
-
-def _num_or_none(text: str, pattern: re.Pattern[str]) -> Optional[float]:
-    m = pattern.search(text)
-    if not m:
-        return None
-    try:
-        return float(m.group(1))
-    except ValueError:
-        return None
-
-
-def _looks_like_billing(html: str) -> bool:
-    return (
-        "monthlyLimit" in html
-        or "monthlyUsage" in html
-        or bool(re.search(r"balance:-?\d", html))
-    )
-
-
-def extract_billing_object(html: str) -> Optional[str]:
-    """Extract the SolidJS billing object anchored on customerID:\"cus_...\"."""
-    start = html.find('customerID:"cus_')
-    if start < 0:
-        return None
-    brace_start = html.rfind("{", 0, start + 1)
-    if brace_start < 0:
-        return None
-    depth = 0
-    for i in range(brace_start, len(html)):
-        c = html[i]
-        if c == "{":
-            depth += 1
-        elif c == "}":
-            depth -= 1
-            if depth == 0:
-                return html[brace_start : i + 1]
-    return None
-
-
-def parse_billing_html(html: str) -> BillingInfo:
-    obj = extract_billing_object(html)
-    if not obj:
-        err = (
-            "billing parser may be outdated"
-            if _looks_like_billing(html)
-            else "no billing data on page"
-        )
-        return BillingInfo(error=err)
-
-    balance = _num_or_none(obj, _RE_BALANCE)
-    monthly_usage = _num_or_none(obj, _RE_MONTHLY_USAGE)
-    monthly_limit = _num_or_none(obj, _RE_MONTHLY_LIMIT)
-    reload_raw = (_RE_RELOAD.search(obj) or [None, None])[1]
-    reload_amount = _num_or_none(obj, _RE_RELOAD_AMOUNT)
-    reload_trigger = _num_or_none(obj, _RE_RELOAD_TRIGGER)
-    use_raw = (_RE_USE_BALANCE.search(obj) or [None, None])[1]
-
-    if balance is None and monthly_usage is None and monthly_limit is None:
-        return BillingInfo(error="billing parser may be outdated")
-
-    use_balance: Optional[bool] = None
-    if use_raw is not None:
-        use_balance = _parse_solid_bool(use_raw)
-
-    return BillingInfo(
-        balance_usd=(balance / MICROCENTS) if balance is not None else 0.0,
-        monthly_usage_usd=(monthly_usage / MICROCENTS)
-        if monthly_usage is not None
-        else 0.0,
-        monthly_limit_usd=monthly_limit if monthly_limit is not None else 0.0,
-        use_balance=use_balance,
-        auto_reload=_parse_solid_bool(reload_raw) if reload_raw else False,
-        reload_amount_usd=reload_amount if reload_amount is not None else 0.0,
-        reload_trigger_usd=reload_trigger if reload_trigger is not None else 0.0,
-    )
-
+CONSOLE_ORIGIN = "https://opencode.ai"
+BILLING_STATUS_PATH = "/console/api/billing/status"
+AUTO_RECHARGE_PATH = "/console/api/billing/auto-recharge"
+GO_STATUS_PATH = "/console/api/go/status"
+# 1e8 microcents = $1 (dollars x 100 cents x 1e6 microcents).
+MICROCENTS_PER_USD = 1e8
 
 FetchFn = Callable[..., object]
 
 
-def query_opencode_billing(
-    workspace_id: str,
-    auth_cookie: str,
+def _as_float(value: Any) -> Optional[float]:
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            return float(text)
+        except ValueError:
+            return None
+    return None
+
+
+def _usd_from_microcents(value: Any) -> Optional[float]:
+    raw = _as_float(value)
+    return None if raw is None else raw / MICROCENTS_PER_USD
+
+
+def _http_error_message(status: int, path: str) -> str:
+    if status in (401, 403):
+        return (
+            f"console session rejected ({status}) for {path}: the auth cookie is "
+            "missing, expired or not signed in"
+        )
+    return f"OpenCode console error {status} ({path})"
+
+
+def console_auth_headers(
+    auth_cookie: str = "",
+    console_token: str = "",
+    org_id: str = "",
+) -> dict[str, str]:
+    """Console auth headers. A bearer token wins over the browser cookie."""
+    token = (console_token or "").strip()
+    if token:
+        headers = {"Authorization": f"Bearer {token}"}
+        if (org_id or "").strip():
+            headers["x-org-id"] = org_id.strip()
+        return headers
+    return {"Cookie": f"auth={(auth_cookie or '').strip()}"}
+
+
+def console_get_json(
+    path: str,
+    auth_headers: dict[str, str],
     *,
     timeout_s: float = DEFAULT_TIMEOUT_S,
     opener: Optional[FetchFn] = None,
-) -> BillingInfo:
-    url = (
-        f"{BILLING_URL_PREFIX}"
-        f"{urllib.request.quote(workspace_id, safe='')}"
-        f"{BILLING_URL_SUFFIX}"
-    )
+) -> tuple[Optional[Any], str, int]:
+    """GET a console JSON endpoint. Returns (payload, error, http_status)."""
     req = urllib.request.Request(
-        url,
+        f"{CONSOLE_ORIGIN}{path}",
         method="GET",
         headers={
             "User-Agent": USER_AGENT,
-            "Accept": "text/html",
-            "Cookie": f"auth={auth_cookie}",
+            "Accept": "application/json",
+            **auth_headers,
         },
     )
     fetch = opener or urllib.request.urlopen
     try:
         with fetch(req, timeout=timeout_s) as resp:  # type: ignore[arg-type]
-            status = getattr(resp, "status", None) or resp.getcode()
+            status = int(getattr(resp, "status", None) or resp.getcode())
             body = resp.read()
             text = (
                 body.decode("utf-8", errors="replace")
                 if isinstance(body, bytes)
                 else str(body)
             )
-            if int(status) < 200 or int(status) >= 300:
-                return BillingInfo(
-                    error=f"OpenCode billing error {status}: {_sanitize(text)}"
-                )
-            return parse_billing_html(text)
     except urllib.error.HTTPError as exc:
         try:
-            body = exc.read().decode("utf-8", errors="replace")
+            text = exc.read().decode("utf-8", errors="replace")
         except Exception:
-            body = str(exc.reason)
-        return BillingInfo(
-            error=f"OpenCode billing error {exc.code}: {_sanitize(body)}"
+            text = str(exc.reason)
+        if exc.code in (401, 403):
+            return None, _http_error_message(exc.code, path), exc.code
+        return (
+            None,
+            f"OpenCode console error {exc.code} ({path}): {_sanitize(text)}",
+            exc.code,
         )
     except Exception as exc:  # noqa: BLE001
-        return BillingInfo(error=_sanitize(str(exc)))
+        return None, _sanitize(str(exc)), 0
+
+    if status < 200 or status >= 300:
+        return None, f"OpenCode console error {status} ({path}): {_sanitize(text)}", status
+    try:
+        return json.loads(text), "", status
+    except ValueError:
+        return (
+            None,
+            f"OpenCode console returned non-JSON for {path}: {_sanitize(text, 60)}",
+            status,
+        )
+
+
+def parse_billing_status(payload: object) -> BillingInfo:
+    """Parse GET /console/api/billing/status."""
+    if not isinstance(payload, dict):
+        return BillingInfo(error="console billing status was not an object")
+    balance = _usd_from_microcents(payload.get("balanceMicroCents"))
+    if balance is None:
+        return BillingInfo(error="console billing status carried no balanceMicroCents")
+    available = _usd_from_microcents(payload.get("availableMicroCents"))
+    return BillingInfo(
+        balance_usd=balance,
+        available_usd=balance if available is None else available,
+        mode=str(payload.get("mode") or ""),
+        billing_mode=str(payload.get("billingMode") or ""),
+        can_purchase_credits=bool(payload.get("canPurchaseCredits")),
+    )
+
+
+def apply_auto_recharge(info: BillingInfo, payload: object) -> BillingInfo:
+    """Fold GET /console/api/billing/auto-recharge into a BillingInfo."""
+    if not isinstance(payload, dict):
+        return info
+    amount = _as_float(payload.get("rechargeAmountDollars"))
+    threshold = _as_float(payload.get("thresholdDollars"))
+    return replace(
+        info,
+        auto_reload=bool(payload.get("enabled")),
+        reload_amount_usd=0.0 if amount is None else amount,
+        reload_trigger_usd=0.0 if threshold is None else threshold,
+        pending_auto_recharge=bool(payload.get("pending")),
+        failure_reason=str(payload.get("failureReason") or ""),
+    )
+
+
+def apply_go_status(info: BillingInfo, payload: object) -> BillingInfo:
+    """Fold GET /console/api/go/status: useBalance + Go monthly money meter."""
+    if not isinstance(payload, dict):
+        return info
+    use_balance = payload.get("useBalance")
+    access = payload.get("access")
+    month: object = None
+    if isinstance(access, dict):
+        meters = access.get("meters")
+        if isinstance(meters, dict):
+            month = meters.get("month")
+    used = (
+        _usd_from_microcents(month.get("usedMicroCents"))
+        if isinstance(month, dict)
+        else None
+    )
+    limit = (
+        _usd_from_microcents(month.get("limitMicroCents"))
+        if isinstance(month, dict)
+        else None
+    )
+    return replace(
+        info,
+        use_balance=use_balance if isinstance(use_balance, bool) else None,
+        monthly_usage_usd=0.0 if used is None else used,
+        monthly_limit_usd=0.0 if limit is None else limit,
+    )
+
+
+def query_opencode_billing(
+    auth_cookie: str = "",
+    *,
+    console_token: str = "",
+    org_id: str = "",
+    timeout_s: float = DEFAULT_TIMEOUT_S,
+    opener: Optional[FetchFn] = None,
+) -> BillingInfo:
+    """Zen balance + Go overage toggle from the console APIs."""
+    headers = console_auth_headers(auth_cookie, console_token, org_id)
+    if not (console_token or "").strip() and not (auth_cookie or "").strip():
+        return BillingInfo(
+            error=(
+                "no console credentials: Zen balance needs either "
+                "OPENCODE_GO_AUTH_COOKIE (browser session) or "
+                "OPENCODE_GO_CONSOLE_TOKEN (console bearer token)"
+            )
+        )
+
+    billing_payload, error, _ = console_get_json(
+        BILLING_STATUS_PATH, headers, timeout_s=timeout_s, opener=opener
+    )
+    if billing_payload is None:
+        return BillingInfo(error=error)
+
+    info = parse_billing_status(billing_payload)
+    if info.error:
+        return info
+
+    auto_payload, _, _ = console_get_json(
+        AUTO_RECHARGE_PATH, headers, timeout_s=timeout_s, opener=opener
+    )
+    if auto_payload is not None:
+        info = apply_auto_recharge(info, auto_payload)
+
+    go_payload, _, _ = console_get_json(
+        GO_STATUS_PATH, headers, timeout_s=timeout_s, opener=opener
+    )
+    if go_payload is not None:
+        info = apply_go_status(info, go_payload)
+
+    return info

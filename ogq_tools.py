@@ -54,7 +54,7 @@ def opencode_go_quota_check(args: Optional[dict[str, Any]] = None, **_: Any) -> 
         if snapshot.billing is None:
             return (
                 "No billing data on this fetch. "
-                "Try force=true or refresh OPENCODE_GO_AUTH_COOKIE."
+                "Try force=true, or refresh the console session (OPENCODE_GO_AUTH_COOKIE)."
             )
         return f"{format_balance_summary(snapshot.billing)}\n\n({format_tool_guidance()})"
     return f"{format_natural_summary(snapshot)}\n\n({format_tool_guidance()})"
@@ -84,7 +84,7 @@ def go_quota_slash(raw_args: str = "") -> str:
         return json.dumps(snapshot.to_dict(), indent=2)
     if balance_only:
         if snapshot.billing is None:
-            return "No billing data on this fetch. Try /go-balance after refreshing the auth cookie."
+            return "No billing data on this fetch. Try /go-balance after refreshing the console auth cookie."
         return format_balance_summary(snapshot.billing)
     return format_natural_summary(snapshot)
 
@@ -103,7 +103,7 @@ def go_balance_slash(raw_args: str = "") -> str:
     if snapshot.billing is None:
         return (
             "No billing data on this fetch. "
-            "Refresh OPENCODE_GO_AUTH_COOKIE and try again."
+            "Refresh the console session (OPENCODE_GO_AUTH_COOKIE) and try again."
         )
     return format_balance_summary(snapshot.billing)
 
@@ -122,7 +122,7 @@ QUOTA_CHECK_SCHEMA: dict[str, Any] = {
         "pace/burn, balance, or Zen credits while using OpenCode Go — e.g. "
         "\"What's my current quota?\", \"What's my remaining balance on OpenCode Go?\". "
         "Do NOT use provider-usage-tracking or send them to the web dashboard "
-        "for Go — this tool scrapes the live dashboard. "
+        "for Go — this tool reads the Go usage API with the Go API key. "
         "Returns natural-language prose to relay to the user."
     ),
     "parameters": {
@@ -130,7 +130,7 @@ QUOTA_CHECK_SCHEMA: dict[str, Any] = {
         "properties": {
             "force": {
                 "type": "boolean",
-                "description": "Bypass short TTL cache and re-scrape the dashboard.",
+                "description": "Bypass short TTL cache and re-fetch usage.",
             },
             "json": {
                 "type": "boolean",

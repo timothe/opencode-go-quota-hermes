@@ -29,15 +29,21 @@ class WindowUsage:
 
 @dataclass(frozen=True)
 class BillingInfo:
-    """Zen pay-as-you-go balance + Go overage toggle (from /billing)."""
+    """Zen pay-as-you-go balance + Go overage toggle (console billing APIs)."""
 
     balance_usd: float = 0.0
+    available_usd: float = 0.0
     monthly_usage_usd: float = 0.0
     monthly_limit_usd: float = 0.0
-    use_balance: Optional[bool] = None  # None = not found on page
+    use_balance: Optional[bool] = None  # None = not reported
     auto_reload: bool = False
     reload_amount_usd: float = 0.0
     reload_trigger_usd: float = 0.0
+    mode: str = ""  # "pay-as-you-go" | "invoiceable"
+    billing_mode: str = ""  # "legacy" | "prepaid" | "seat" | "credit"
+    can_purchase_credits: bool = False
+    pending_auto_recharge: bool = False
+    failure_reason: str = ""
     error: str = ""
 
     def to_dict(self) -> dict[str, Any]:

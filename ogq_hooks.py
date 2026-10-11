@@ -161,7 +161,7 @@ def _balance_answer_context(snapshot: QuotaSnapshot) -> str:
     if snapshot.billing is None:
         prose = (
             "I couldn't read Zen balance (no billing data on this fetch). "
-            "Try /go-balance or refresh OPENCODE_GO_AUTH_COOKIE."
+            "Try /go-balance, or refresh the console session cookie (OPENCODE_GO_AUTH_COOKIE)."
         )
     else:
         prose = format_balance_summary(snapshot.billing)
@@ -221,7 +221,7 @@ def on_pre_llm_call(
         except Exception:  # noqa: BLE001
             chunks.append(
                 "[OpenCode Go balance] Could not fetch billing just now. "
-                "Ask the user to try /go-balance, or refresh OPENCODE_GO_AUTH_COOKIE."
+                "Ask the user to try /go-balance, or to refresh the console session cookie."
             )
     elif looks_like_quota_question(user_message):
         try:
@@ -230,7 +230,8 @@ def on_pre_llm_call(
         except Exception:  # noqa: BLE001
             chunks.append(
                 "[OpenCode Go quota] Could not fetch quota just now. "
-                "Ask the user to try /go-quota, or refresh OPENCODE_GO_AUTH_COOKIE."
+                "Ask the user to try /go-quota, and to check OPENCODE_GO_API_KEY "
+                "if the failure mentions the usage API."
             )
 
     asked = looks_like_balance_question(user_message) or looks_like_quota_question(

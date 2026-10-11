@@ -85,37 +85,53 @@ def format_usd(amount: float) -> str:
 def format_balance_summary(billing: BillingInfo) -> str:
     """Prose for Zen balance + Go use-balance-after-limits toggle."""
     if billing.error:
+        if "cookie" in billing.error.lower() or "session rejected" in billing.error:
+            advice = (
+                "The console session cookie is stale. Copy a fresh `auth` cookie "
+                "from opencode.ai into OPENCODE_GO_AUTH_COOKIE."
+            )
+        else:
+            advice = "Try again shortly; if it keeps failing, check the console session cookie."
         return (
             "I couldn't read your OpenCode Zen balance just now "
-            f"({billing.error}). "
-            "Refresh OPENCODE_GO_AUTH_COOKIE from opencode.ai and try again."
+            f"({billing.error}). {advice}"
         )
 
     parts = [f"Your OpenCode Zen balance is {format_usd(billing.balance_usd)}"]
+    if billing.available_usd and abs(billing.available_usd - billing.balance_usd) > 0.005:
+        parts.append(f"{format_usd(billing.available_usd)} of it available to spend")
+    body = parts[0] if len(parts) == 1 else f"{parts[0]} ({parts[1]})"
+    if billing.mode:
+        body += f", on {billing.mode} billing"
     if billing.monthly_limit_usd > 0:
-        parts.append(
-            f"this month's Zen spend is {format_usd(billing.monthly_usage_usd)} "
-            f"of a {format_usd(billing.monthly_limit_usd)} monthly cap"
+        body += (
+            f"; your Go monthly window is {format_usd(billing.monthly_usage_usd)} "
+            f"used of {format_usd(billing.monthly_limit_usd)}"
         )
-    body = parts[0] if len(parts) == 1 else f"{parts[0]}; {parts[1]}"
 
     if billing.use_balance is True:
         toggle = (
-            "Use-balance-after-Go-limits is on — when Go quota windows are "
+            "Use-balance-after-Go-limits is on: when Go quota windows are "
             "exhausted, usage falls back to this Zen balance"
         )
     elif billing.use_balance is False:
         toggle = (
-            "Use-balance-after-Go-limits is off — hitting Go quota windows "
+            "Use-balance-after-Go-limits is off: hitting Go quota windows "
             "will block requests instead of drawing from Zen balance"
         )
     else:
         toggle = (
             "Could not tell whether Use-balance-after-Go-limits is enabled "
-            "from the billing page"
+            "from the console"
         )
 
-    return f"{body}. {toggle}."
+    text = f"{body}. {toggle}."
+    if billing.auto_reload:
+        text += (
+            f" Auto-recharge is on: tops up {format_usd(billing.reload_amount_usd)} "
+            f"when the balance drops below {format_usd(billing.reload_trigger_usd)}."
+        )
+    return text
 
 
 def format_natural_summary(
@@ -128,11 +144,19 @@ def format_natural_summary(
     """Prose summary the model can relay to the user."""
     if snapshot.status in {"error", "incomplete"}:
         detail = snapshot.error or snapshot.message or "unknown error"
+        if "usage API" in detail or "API_KEY" in detail:
+            advice = (
+                "The Go usage API rejected the request — check that "
+                "OPENCODE_GO_API_KEY is valid and unused/revoked."
+            )
+        else:
+            advice = (
+                "The dashboard auth cookie may have expired — refresh "
+                "OPENCODE_GO_AUTH_COOKIE from opencode.ai and try again."
+            )
         return (
             "I couldn't read your OpenCode Go quota just now "
-            f"({detail}). "
-            "The dashboard auth cookie may have expired — refresh "
-            "OPENCODE_GO_AUTH_COOKIE from opencode.ai and try again."
+            f"({detail}). {advice}"
         )
 
     now = now or datetime.now(timezone.utc)

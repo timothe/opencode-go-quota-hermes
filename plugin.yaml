@@ -1,29 +1,50 @@
 name: opencode-go-quota
-version: "0.2.0"
+version: "0.4.0"
 description: >
-  OpenCode Go only — track 5h / weekly / monthly subscription quota by scraping
-  the opencode.ai workspace dashboard, plus Zen balance / Use-balance-after-Go-limits
-  from /billing. Pace-aware advice and local usage history. Natural-language answers
-  for quota and balance questions. Warns via pre_llm_call; optional auto-block.
-  Does not cover OpenRouter or hermes insights.
+  OpenCode Go only — track 5h / weekly / monthly subscription quota from the
+  official Go usage API (Go API key, no browser cookie), plus Zen balance /
+  Use-balance-after-Go-limits from the console billing JSON APIs. Pace-aware
+  advice and local usage history. Natural-language answers for quota and balance
+  questions. Warns via pre_llm_call; optional auto-block. Does not cover
+  OpenRouter or hermes insights.
 author: timothe
 hooks:
   - pre_llm_call
   - pre_tool_call
 requires_env:
+  - name: OPENCODE_GO_API_KEY
+    description: >
+      OpenCode Go inference API key. This is the quota source: the plugin calls
+      https://opencode.ai/zen/go/v1/usage with it as a bearer token. Get it from
+      your OpenCode Zen/Go console API keys page. No browser session needed.
+    secret: true
   - name: OPENCODE_GO_WORKSPACE_ID
     description: >
-      Workspace ID from the OpenCode Go usage URL.
-      Open https://opencode.ai/auth and sign in, then open your Go workspace page
-      (URL looks like https://opencode.ai/workspace/YOUR_ID/go). Copy YOUR_ID only —
-      not the whole URL. This is NOT your API key.
+      Optional. Workspace ID from the OpenCode Go usage URL
+      (https://opencode.ai/workspace/YOUR_ID/go). Only used by the retired
+      dashboard-scrape fallback and to scope Zen billing lookups. Quota does not
+      need it.
     secret: false
   - name: OPENCODE_GO_AUTH_COOKIE
     description: >
-      Browser session cookie named "auth" for opencode.ai (required because Go has
-      no public quota API). Chrome/Edge/Brave: open https://opencode.ai while signed
-      in → F12 DevTools → Application (Chrome) or Storage (Firefox) → Cookies →
-      https://opencode.ai → select cookie named exactly "auth" → copy its Value
-      (long string). Paste that value here. It expires when you sign out or after
-      some idle time — re-copy if quota checks start failing. Never commit this.
+      Optional. Browser session cookie named "auth" for opencode.ai. Needed for
+      Zen balance / Use-balance-after-Go-limits (/go-balance), which reads the
+      console JSON APIs — quota itself uses OPENCODE_GO_API_KEY. Chrome/Edge/Brave:
+      open https://opencode.ai while signed in → F12 DevTools → Application
+      (Chrome) or Storage (Firefox) → Cookies → https://opencode.ai → select
+      cookie named exactly "auth" → copy its Value. It expires when you sign out
+      or after some idle time. Never commit this.
     secret: true
+  - name: OPENCODE_GO_CONSOLE_TOKEN
+    description: >
+      Optional alternative to the auth cookie for Zen balance: an OpenCode
+      Console access token, sent as "Authorization: Bearer". Obtainable via
+      "opencode auth login opencode" (stored under the `opencode` integration in
+      opencode.db / auth.json). Takes precedence over the cookie when set.
+    secret: true
+  - name: OPENCODE_GO_ORG_ID
+    description: >
+      Optional. Organisation ID for console requests (sent as x-org-id). Only
+      needed when the console login is org-scoped, i.e. alongside
+      OPENCODE_GO_CONSOLE_TOKEN.
+    secret: false
